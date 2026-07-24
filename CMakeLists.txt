@@ -1,0 +1,159 @@
+cmake_minimum_required(VERSION 4.2)
+project(minesweeper VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
+set(TARGET_SERVER "ms_server")
+set(TARGET_SOLVER "ms_solver")
+set(TARGET_GENERATOR "ms_generator")
+set(TARGET_COMMON "ms_lib")
+
+list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local/lib/cmake")
+
+find_package(fmt REQUIRED)
+find_package(spdlog REQUIRED)
+find_package(yaml-cpp REQUIRED)
+find_package(CLI11 REQUIRED)
+find_package(static_vector REQUIRED)
+find_package(Curses)
+find_package(Boost)
+find_package(OpenSSL)
+find_package(PalSigslot)
+
+find_program(CLANG_TIDY_EXE NAMES clang-tidy)
+if (CLANG_TIDY_EXE)
+    message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy" CACHE STRING "clang-tidy executable" FORCE)
+endif ()
+
+if (CURSES_FOUND)
+    message(STATUS "Curses library found: ${CURSES_VERSION}")
+    add_compile_definitions(USE_CURSES=1)
+else ()
+    message(WARNING "Curses library not found. Some features may be disabled.")
+    add_compile_definitions(USE_CURSES=0)
+endif ()
+
+if (Boost_FOUND)
+    message(STATUS "Boost library found: ${Boost_VERSION}")
+    add_compile_definitions(USE_BOOST=1)
+else ()
+    message(WARNING "Boost library not found. Some features may be disabled.")
+    add_compile_definitions(USE_BOOST=0)
+endif ()
+
+if (OpenSSL_FOUND)
+    message(STATUS "OpenSSL library found: ${OPENSSL_VERSION}")
+    add_compile_definitions(USE_OPENSSL=1)
+else ()
+    message(WARNING "OpenSSL library not found. Some features may be disabled.")
+    add_compile_definitions(USE_OPENSSL=0)
+endif ()
+
+if (CLI11_FOUND)
+    message(STATUS "CLI11 library found: ${CLI11_VERSION}")
+    add_compile_definitions(USE_CLI11=1)
+else ()
+    message(WARNING "CLI11 library not found. Some features may be disabled.")
+    add_compile_definitions(USE_CLI11=0)
+endif ()
+
+if (fmt_FOUND)
+    message(STATUS "fmt library found: ${fmt_VERSION}")
+    add_compile_definitions(USE_FMT=1)
+else ()
+    message(WARNING "fmt library not found. Some features may be disabled.")
+    add_compile_definitions(USE_FMT=0)
+endif ()
+
+if (yaml-cpp_FOUND)
+    message(STATUS "yaml-cpp library found: ${yaml-cpp_VERSION}")
+    add_compile_definitions(USE_YAML_CPP=1)
+else ()
+    message(WARNING "yaml-cpp library not found. Some features may be disabled.")
+    add_compile_definitions(USE_YAML_CPP=0)
+endif ()
+
+if (static_vector_FOUND)
+    message(STATUS "static_vector library found: ${static_vector_VERSION}")
+    add_compile_definitions(USE_STATIC_VECTOR=1)
+else ()
+    message(WARNING "static_vector library not found. Some features may be disabled.")
+    add_compile_definitions(USE_STATIC_VECTOR=0)
+endif ()
+
+if (spdlog_FOUND)
+    message(STATUS "spdlog library found: ${spdlog_VERSION}")
+    add_compile_definitions(USE_SPDLOG=1)
+else ()
+    message(WARNING "spdlog library not found. Some features may be disabled.")
+    add_compile_definitions(USE_SPDLOG=0)
+endif ()
+
+if (PalSigslot_FOUND)
+    message(STATUS "PalSigslot library found: ${PalSigslot_VERSION}")
+    add_compile_definitions(USE_PALSIGSLOT=1)
+else()
+    message(WARNING "PalSigslot library not found. Some features may be disabled.")
+    add_compile_definitions(USE_PALSIGSLOT=0)
+endif ()
+
+add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "Debug build type selected.")
+    add_compile_definitions(NDEBUG=0)
+elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(STATUS "Release build type selected.")
+    add_compile_definitions(NDEBUG=1)
+endif ()
+
+add_compile_definitions(
+        PROJECT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        PROJECT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+        PROJECT_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+        $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+        $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
+)
+include_directories(${CMAKE_SOURCE_DIR}/)
+
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found: ${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+endif ()
+
+set(SOURCES_COMMON
+        src/common/utils.cxx
+        src/common/config.cxx
+)
+
+set(SOURCES_SERVER
+        src/server/server.cxx
+)
+
+set(SOURCES_SOLVER
+        src/solver/solver.cxx
+)
+
+set(SOURCES_GENERATOR
+        src/generator/generator.cxx
+)
+
+add_library(${TARGET_COMMON} STATIC ${SOURCES_COMMON})
+target_link_libraries(${TARGET_COMMON} PUBLIC fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11)
+
+add_executable(${TARGET_SERVER} ${SOURCES_SERVER})
+target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON} Pal::Sigslot)
+
+add_executable(${TARGET_SOLVER} ${SOURCES_SOLVER})
+target_link_libraries(${TARGET_SOLVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
+
+add_executable(${TARGET_GENERATOR} ${SOURCES_GENERATOR})
+target_link_libraries(${TARGET_GENERATOR} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
