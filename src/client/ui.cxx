@@ -36,33 +36,51 @@ namespace {
     return COLOR_PAIR_HIDDEN;
   }
 
-  // Draws the 3x3 box for a cell: a single-line ACS box normally, or a real
-  // double-line box (via ncursesw's wide WACS_D_* glyphs) when the cell is
-  // the one currently selected by the cursor.
+  // Terminal character cells are noticeably taller than they are wide, so a
+  // square (equal columns/rows) box per field cell renders visually as a
+  // tall rectangle. Using more columns than rows per box compensates for
+  // that and makes the field look roughly square on screen.
+  constexpr int CELL_WIDTH  = 5;
+  constexpr int CELL_HEIGHT = 3;
+
+  // Draws the CELL_WIDTH x CELL_HEIGHT box for a cell: a single-line ACS box
+  // normally, or a real double-line box (via ncursesw's wide WACS_D_*
+  // glyphs) when the cell is the one currently selected by the cursor.
   void draw_cell_box (int base_row, int base_col, bool selected) {
     const int pair_id = selected ? COLOR_PAIR_SELECTED : COLOR_PAIR_BORDER;
     attron(COLOR_PAIR(pair_id));
     if ( selected )
       attron(A_BOLD);
 
+    const int right  = base_col + CELL_WIDTH - 1;
+    const int bottom = base_row + CELL_HEIGHT - 1;
+
     if ( selected ) {
       mvadd_wch(base_row, base_col, WACS_D_ULCORNER);
-      mvadd_wch(base_row, base_col + 1, WACS_D_HLINE);
-      mvadd_wch(base_row, base_col + 2, WACS_D_URCORNER);
-      mvadd_wch(base_row + 1, base_col, WACS_D_VLINE);
-      mvadd_wch(base_row + 1, base_col + 2, WACS_D_VLINE);
-      mvadd_wch(base_row + 2, base_col, WACS_D_LLCORNER);
-      mvadd_wch(base_row + 2, base_col + 1, WACS_D_HLINE);
-      mvadd_wch(base_row + 2, base_col + 2, WACS_D_LRCORNER);
+      mvadd_wch(base_row, right, WACS_D_URCORNER);
+      mvadd_wch(bottom, base_col, WACS_D_LLCORNER);
+      mvadd_wch(bottom, right, WACS_D_LRCORNER);
+      for ( int c = base_col + 1; c < right; ++c ) {
+        mvadd_wch(base_row, c, WACS_D_HLINE);
+        mvadd_wch(bottom, c, WACS_D_HLINE);
+      }
+      for ( int r = base_row + 1; r < bottom; ++r ) {
+        mvadd_wch(r, base_col, WACS_D_VLINE);
+        mvadd_wch(r, right, WACS_D_VLINE);
+      }
     } else {
       mvaddch(base_row, base_col, ACS_ULCORNER);
-      mvaddch(base_row, base_col + 1, ACS_HLINE);
-      mvaddch(base_row, base_col + 2, ACS_URCORNER);
-      mvaddch(base_row + 1, base_col, ACS_VLINE);
-      mvaddch(base_row + 1, base_col + 2, ACS_VLINE);
-      mvaddch(base_row + 2, base_col, ACS_LLCORNER);
-      mvaddch(base_row + 2, base_col + 1, ACS_HLINE);
-      mvaddch(base_row + 2, base_col + 2, ACS_LRCORNER);
+      mvaddch(base_row, right, ACS_URCORNER);
+      mvaddch(bottom, base_col, ACS_LLCORNER);
+      mvaddch(bottom, right, ACS_LRCORNER);
+      for ( int c = base_col + 1; c < right; ++c ) {
+        mvaddch(base_row, c, ACS_HLINE);
+        mvaddch(bottom, c, ACS_HLINE);
+      }
+      for ( int r = base_row + 1; r < bottom; ++r ) {
+        mvaddch(r, base_col, ACS_VLINE);
+        mvaddch(r, right, ACS_VLINE);
+      }
     }
 
     if ( selected )
@@ -86,14 +104,14 @@ namespace {
     for ( int by = 0; by < height; ++by ) {
       for ( int bx = 0; bx < width; ++bx ) {
         const bool selected = bx == cursor_x - 1 && by == cursor_y - 1;
-        const int  base_row = top + by * 3;
-        const int  base_col = bx * 3;
+        const int  base_row = top + by * CELL_HEIGHT;
+        const int  base_col = bx * CELL_WIDTH;
 
         draw_cell_box(base_row, base_col, selected);
 
         const cell_t& cell = board.at(bx + 1, by + 1);
         attron(COLOR_PAIR(color_for(cell)));
-        mvaddch(base_row + 1, base_col + 1, symbol_for(cell));
+        mvaddch(base_row + CELL_HEIGHT / 2, base_col + CELL_WIDTH / 2, symbol_for(cell));
         attroff(COLOR_PAIR(color_for(cell)));
       }
     }
