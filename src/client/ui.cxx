@@ -2,6 +2,7 @@
 
 #include <curses.h>
 
+#include <clocale>
 #include <string>
 
 #include "board.hxx"
@@ -35,9 +36,9 @@ namespace {
     return COLOR_PAIR_HIDDEN;
   }
 
-  // Draws the 3x3 single-line box for a cell, or a double-line box (using
-  // '#'/'=' since the linked curses build has no wide-character support) when
-  // the cell is the one currently selected by the cursor.
+  // Draws the 3x3 box for a cell: a single-line ACS box normally, or a real
+  // double-line box (via ncursesw's wide WACS_D_* glyphs) when the cell is
+  // the one currently selected by the cursor.
   void draw_cell_box (int base_row, int base_col, bool selected) {
     const int pair_id = selected ? COLOR_PAIR_SELECTED : COLOR_PAIR_BORDER;
     attron(COLOR_PAIR(pair_id));
@@ -45,14 +46,14 @@ namespace {
       attron(A_BOLD);
 
     if ( selected ) {
-      mvaddch(base_row, base_col, '#');
-      mvaddch(base_row, base_col + 1, '=');
-      mvaddch(base_row, base_col + 2, '#');
-      mvaddch(base_row + 1, base_col, '#');
-      mvaddch(base_row + 1, base_col + 2, '#');
-      mvaddch(base_row + 2, base_col, '#');
-      mvaddch(base_row + 2, base_col + 1, '=');
-      mvaddch(base_row + 2, base_col + 2, '#');
+      mvadd_wch(base_row, base_col, WACS_D_ULCORNER);
+      mvadd_wch(base_row, base_col + 1, WACS_D_HLINE);
+      mvadd_wch(base_row, base_col + 2, WACS_D_URCORNER);
+      mvadd_wch(base_row + 1, base_col, WACS_D_VLINE);
+      mvadd_wch(base_row + 1, base_col + 2, WACS_D_VLINE);
+      mvadd_wch(base_row + 2, base_col, WACS_D_LLCORNER);
+      mvadd_wch(base_row + 2, base_col + 1, WACS_D_HLINE);
+      mvadd_wch(base_row + 2, base_col + 2, WACS_D_LRCORNER);
     } else {
       mvaddch(base_row, base_col, ACS_ULCORNER);
       mvaddch(base_row, base_col + 1, ACS_HLINE);
@@ -103,6 +104,7 @@ namespace {
 }// namespace
 
 void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t height, int bombs_total) {
+  std::setlocale(LC_ALL, "");
   initscr( );
   cbreak( );
   noecho( );
@@ -113,7 +115,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
     start_color( );
     use_default_colors( );
     init_pair(COLOR_PAIR_HIDDEN, COLOR_WHITE, COLOR_BLUE);
-    init_pair(COLOR_PAIR_FLAGGED, COLOR_YELLOW, COLOR_BLUE);
+    init_pair(COLOR_PAIR_FLAGGED, COLOR_BLACK, COLOR_YELLOW);
     init_pair(COLOR_PAIR_BOOM, COLOR_WHITE, COLOR_RED);
     init_pair(COLOR_PAIR_REVEALED, COLOR_CYAN, COLOR_BLACK);
     init_pair(COLOR_PAIR_BORDER, COLOR_WHITE, -1);

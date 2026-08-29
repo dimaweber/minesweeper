@@ -23,7 +23,7 @@ std::optional<client_id_t> client_api_t::field_new (std::optional<field_id_t> fi
   if ( json.is_discarded( ) || !json.contains("client_id") ) {
     return std::nullopt;
   }
-  return std::stoull(json.at("client_id").get<std::string>( ));
+  return json.at("client_id").get<client_id_t>( );
 }
 
 std::optional<std::pair<std::size_t, std::size_t>> client_api_t::field_size (client_id_t id) {
@@ -37,7 +37,7 @@ std::optional<std::pair<std::size_t, std::size_t>> client_api_t::field_size (cli
   if ( json.is_discarded( ) || !json.contains("width") || !json.contains("height") ) {
     return std::nullopt;
   }
-  return std::make_pair(std::stoull(json.at("width").get<std::string>( )), std::stoull(json.at("height").get<std::string>( )));
+  return std::make_pair(json.at("width").get<std::size_t>( ), json.at("height").get<std::size_t>( ));
 }
 
 bombs_result_t client_api_t::field_bombs (client_id_t id) {
@@ -53,8 +53,8 @@ bombs_result_t client_api_t::field_bombs (client_id_t id) {
     return result;
   }
   result.ok    = true;
-  result.left  = std::stoi(json.at("bombs").get<std::string>( ));
-  result.total = std::stoi(json.at("total").get<std::string>( ));
+  result.left  = json.at("bombs").get<int>( );
+  result.total = json.at("total").get<int>( );
   return result;
 }
 
@@ -77,7 +77,7 @@ reveal_result_t client_api_t::action_reveal (client_id_t id, int x, int y) {
   result.ok   = true;
   result.boom = json.at("status").get<std::string>( ) == "boom";
   if ( !result.boom && json.contains("count") ) {
-    result.count = std::stoi(json.at("count").get<std::string>( ));
+    result.count = json.at("count").get<int>( );
   }
   return result;
 }
@@ -99,6 +99,6 @@ flag_result_t client_api_t::action_flag (client_id_t id, int x, int y) {
   }
 
   result.ok      = true;
-  result.flagged = json.at("flagged").get<std::string>( ) == "1" || json.at("flagged").get<std::string>( ) == "true";
+  result.flagged = json.at("flagged").get<bool>( );
   return result;
 }

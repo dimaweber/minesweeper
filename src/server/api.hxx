@@ -193,19 +193,16 @@ struct addon_api_t {
 using SessionPtr  = std::shared_ptr<restbed::Session>;
 using ResourcePtr = std::shared_ptr<restbed::Resource>;
 using headers_t   = std::multimap<std::string, std::string>;
+using parameter_t = std::variant<std::string, int, uint, long, ulong, bool>;
 
 class response_t {
 public:
   explicit response_t (SessionPtr session) : session_ {std::move(session)} {
   }
 
-  response_t& add_field (const std::string& key, const std::convertible_to<std::string> auto& value) {
-    fields_.emplace(key, std::string {value});
+  response_t& add_field (const std::string& key, parameter_t value) {
+    fields_.emplace(key, value);
     return *this;
-  }
-
-  response_t& add_field (const std::string& key, std::integral auto value) {
-    return add_field(key, std::to_string(value));
   }
 
   response_t& add_header (const std::string& key, const std::convertible_to<std::string> auto& value) {
@@ -250,10 +247,10 @@ public:
 
 private:
   SessionPtr                                   session_;
-  std::unordered_map<std::string, std::string> fields_;
+  std::unordered_map<std::string, parameter_t> fields_;
   headers_t                                    headers_;
 
-  std::string response_body (content_type_t content_type, const std::unordered_map<std::string, std::string>& m) {
+  std::string response_body (content_type_t content_type, const std::unordered_map<std::string, parameter_t>& m) {
     switch ( content_type ) {
       case content_type_t::yaml:
         {
@@ -264,7 +261,7 @@ private:
           YAML::Emitter emitter;
           emitter << YAML::BeginMap;
           for ( const auto& [key, value]: m ) {
-            emitter << YAML::Key << key << YAML::Value << value;
+            std::visit([&emitter, &key] (const auto& v) { emitter << YAML::Key << key << YAML::Value << v; }, value);
           }
           emitter << YAML::EndMap;
           return emitter.c_str( );
@@ -273,7 +270,7 @@ private:
         {
           nlohmann::json json_body;
           for ( const auto& [key, value]: m ) {
-            json_body[key] = value;
+            std::visit([&json_body, &key] (const auto& v) { json_body[key] = v; }, value);
           }
           return json_body.dump( );
         }
@@ -288,7 +285,16 @@ private:
           printer.OpenElement("response");
           for ( const auto& [key, value]: m ) {
             printer.OpenElement(key.c_str( ));
-            printer.PushText(value.c_str( ));
+            std::visit(
+                [&printer] (const auto& v) {
+                  using T = std::decay_t<decltype(v)>;
+                  if constexpr ( std::is_same_v<T, std::string> ) {
+                    printer.PushText(v.c_str( ));
+                  } else {
+                    printer.PushText(v);
+                  }
+                },
+                value);
             printer.CloseElement( );
           }
           printer.CloseElement( );
