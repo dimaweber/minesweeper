@@ -15,6 +15,7 @@
 #include <unordered_map>
 
 #include "api.hxx"
+#include "handlers.hxx"
 #include "inc/logger.hxx"
 
 struct resource_t {
@@ -41,11 +42,13 @@ int main (int argc, const char* argv[]) {
   }
 
   const std::vector<resource_t> resources {
-      {.path = "/field/new",     .method = http_methods_t::POST, .handler = field_new_handler    },
-      {.path = "/field/size",    .method = http_methods_t::GET,  .handler = field_size_handler   },
-      {.path = "/field/bombs",   .method = http_methods_t::GET,  .handler = field_bombs_handler  },
-      {.path = "/action/reveal", .method = http_methods_t::POST, .handler = action_reveal_handler},
-      {.path = "/action/flag",   .method = http_methods_t::POST, .handler = action_flag_handler  },
+      {.path = "/field/new",            .method = http_methods_t::POST, .handler = field_new_handler           },
+      {.path = "/field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
+      {.path = "/field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
+      {.path = "/field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
+      {.path = "/action/reveal",        .method = http_methods_t::POST, .handler = action_reveal_handler       },
+      {.path = "/action/flag",          .method = http_methods_t::POST, .handler = action_flag_handler         },
+      {.path = "/action/check",         .method = http_methods_t::POST, .handler = action_check_handler        },
   };
 
   const auto settings = std::make_shared<restbed::Settings>( );

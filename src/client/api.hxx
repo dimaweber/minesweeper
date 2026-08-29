@@ -35,6 +35,12 @@ struct bombs_result_t {
   int  total {0};
 };
 
+struct check_result_t {
+  bool        ok {false};
+  bool        win {false};
+  std::string error;
+};
+
 class client_api_t {
 public:
   client_api_t (std::string host, uint16_t port);
@@ -44,6 +50,8 @@ public:
   [[nodiscard]] bombs_result_t field_bombs (client_id_t id);
   [[nodiscard]] reveal_result_t action_reveal (client_id_t id, int x, int y);
   [[nodiscard]] flag_result_t action_flag (client_id_t id, int x, int y);
+  [[nodiscard]] std::optional<bool> field_fully_revealed (client_id_t id);
+  [[nodiscard]] check_result_t action_check (client_id_t id);
 
 private:
   http_client_t http_;

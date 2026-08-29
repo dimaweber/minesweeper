@@ -2,7 +2,9 @@
 
 #include <curses.h>
 
+#include <algorithm>
 #include <clocale>
+#include <optional>
 #include <string>
 
 #include "board.hxx"
@@ -15,6 +17,8 @@ namespace {
   constexpr int COLOR_PAIR_REVEALED  = 4;
   constexpr int COLOR_PAIR_BORDER    = 5;
   constexpr int COLOR_PAIR_SELECTED  = 6;
+  constexpr int COLOR_PAIR_WIN       = 7;
+  constexpr int COLOR_PAIR_LOSE      = 8;
 
   char symbol_for (const cell_t& cell) {
     switch ( cell.state ) {
@@ -125,6 +129,48 @@ namespace {
     refresh( );
   }
 
+  // Draws a small bordered popup window centered on the screen, on top of the
+  // already-drawn game field, announcing the game result (win/lose/boom).
+  void draw_result_window (const std::string& title, int color_pair) {
+    int max_y = 0;
+    int max_x = 0;
+    getmaxyx(stdscr, max_y, max_x);
+
+    const int win_h = 5;
+    const int win_w = std::max(static_cast<int>(title.size( )) + 6, 24);
+    const int win_y = std::max(0, (max_y - win_h) / 2);
+    const int win_x = std::max(0, (max_x - win_w) / 2);
+
+    attron(COLOR_PAIR(color_pair));
+    attron(A_BOLD);
+
+    for ( int r = 0; r < win_h; ++r ) {
+      for ( int c = 0; c < win_w; ++c ) {
+        mvaddch(win_y + r, win_x + c, ' ');
+      }
+    }
+
+    mvaddch(win_y, win_x, ACS_ULCORNER);
+    mvaddch(win_y, win_x + win_w - 1, ACS_URCORNER);
+    mvaddch(win_y + win_h - 1, win_x, ACS_LLCORNER);
+    mvaddch(win_y + win_h - 1, win_x + win_w - 1, ACS_LRCORNER);
+    for ( int c = 1; c < win_w - 1; ++c ) {
+      mvaddch(win_y, win_x + c, ACS_HLINE);
+      mvaddch(win_y + win_h - 1, win_x + c, ACS_HLINE);
+    }
+    for ( int r = 1; r < win_h - 1; ++r ) {
+      mvaddch(win_y + r, win_x, ACS_VLINE);
+      mvaddch(win_y + r, win_x + win_w - 1, ACS_VLINE);
+    }
+
+    const int text_col = win_x + std::max(0, (win_w - static_cast<int>(title.size( ))) / 2);
+    mvprintw(win_y + win_h / 2, text_col, "%s", title.c_str( ));
+
+    attroff(A_BOLD);
+    attroff(COLOR_PAIR(color_pair));
+    refresh( );
+  }
+
 }// namespace
 
 void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t height, int bombs_total) {
@@ -144,6 +190,8 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
     init_pair(COLOR_PAIR_REVEALED, COLOR_CYAN, COLOR_BLACK);
     init_pair(COLOR_PAIR_BORDER, COLOR_WHITE, -1);
     init_pair(COLOR_PAIR_SELECTED, COLOR_GREEN, -1);
+    init_pair(COLOR_PAIR_WIN, COLOR_BLACK, COLOR_GREEN);
+    init_pair(COLOR_PAIR_LOSE, COLOR_WHITE, COLOR_RED);
   }
 
   board_t board(width, height);
@@ -158,6 +206,25 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
     bombs_left  = bombs.left;
     bombs_total = bombs.total;
   }
+
+  // After a reveal/flag action, asks the server whether the field is now fully
+  // revealed and, if so, runs the win/lose check and shows the result as a popup
+  // window on top of the board.
+  const auto check_game_end = [&] ( ) {
+    const std::optional<bool> fully = api.field_fully_revealed(id);
+    if ( !fully || !*fully )
+      return;
+
+    const check_result_t check = api.action_check(id);
+    if ( !check.ok )
+      return;
+
+    draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "");
+    draw_result_window(check.win ? "You win! Press any key to exit." : "You lose! Press any key to exit.",
+                        check.win ? COLOR_PAIR_WIN : COLOR_PAIR_LOSE);
+    getch( );
+    game_over = true;
+  };
 
   draw(board, cursor_x, cursor_y, bombs_left, bombs_total, message);
 
@@ -192,7 +259,8 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
             for ( const auto& cell: result.cells ) {
               board.at(cell.x, cell.y).state = cell_state_t::boom;
             }
-            draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "Boom! Game over. Press any key to exit.");
+            draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "");
+            draw_result_window("Boom! You lose. Press any key to exit.", COLOR_PAIR_LOSE);
             getch( );
             game_over = true;
           } else {
@@ -200,6 +268,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
               board.at(cell.x, cell.y).state = cell_state_t::revealed;
               board.at(cell.x, cell.y).count = cell.count;
             }
+            check_game_end( );
           }
           break;
         }
@@ -216,6 +285,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
               bombs_left  = refreshed.left;
               bombs_total = refreshed.total;
             }
+            check_game_end( );
           }
           break;
         }

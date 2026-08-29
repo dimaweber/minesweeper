@@ -55,6 +55,30 @@ struct field_t {
     return data_[coord_to_index(x, y)];
   }
 
+  auto begin ( ) {
+    return data_.begin( );
+  }
+
+  auto end ( ) {
+    return data_.end( );
+  }
+
+  auto cbegin ( ) {
+    return data_.cbegin( );
+  }
+
+  auto cend ( ) {
+    return data_.cend( );
+  }
+
+  auto begin ( ) const {
+    return data_.cbegin( );
+  }
+
+  auto end ( ) const {
+    return data_.cend( );
+  }
+
   [[nodiscard]] static bool is_boom (ushort cell) {
     return (cell & 0x0a) == 0x0a;
   }
@@ -125,8 +149,12 @@ struct field_t {
     return std::ranges::count_if(data_, [] (u_short cell) { return field_t::is_flag(cell); });
   }
 
-  [[nodiscard]] int bombs_left ( ) const {
+  [[nodiscard]] int bombs_count ( ) const {
     return bombs_total( ) - flags_count( );
+  }
+
+  [[nodiscard]] int unrevealed_count ( ) const {
+    return std::ranges::count_if(data_, [] (u_short cell) { return !field_t::is_revealed(cell); });
   }
 };
 
@@ -203,9 +231,7 @@ using headers_t   = std::multimap<std::string, std::string>;
 // since C++17 relaxed the incomplete-type requirements for `std::vector`;
 // libstdc++'s node-based `std::unordered_map` supports incomplete mapped
 // types the same way in practice).
-struct parameter_t
-    : std::variant<std::string, int, uint, long, ulong, bool, std::vector<parameter_t>,
-                   std::unordered_map<std::string, parameter_t>> {
+struct parameter_t : std::variant<std::string, int, uint, long, ulong, bool, std::vector<parameter_t>, std::unordered_map<std::string, parameter_t>> {
   using variant::variant;
 };
 
@@ -217,73 +243,67 @@ using parameter_map_t  = std::unordered_map<std::string, parameter_t>;
 // in one place instead of being duplicated per-format inside response_body.
 struct parameter_serializer_t {
   static void write_yaml (YAML::Emitter& emitter, const parameter_t& value) {
-    std::visit(
-        [&emitter] (const auto& v) {
-          using T = std::decay_t<decltype(v)>;
-          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
-            emitter << YAML::BeginSeq;
-            for ( const auto& item: v )
-              write_yaml(emitter, item);
-            emitter << YAML::EndSeq;
-          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
-            emitter << YAML::BeginMap;
-            for ( const auto& [key, item]: v ) {
-              emitter << YAML::Key << key << YAML::Value;
-              write_yaml(emitter, item);
-            }
-            emitter << YAML::EndMap;
-          } else {
-            emitter << v;
-          }
-        },
-        value);
+    std::visit([&emitter] (const auto& v) {
+      using T = std::decay_t<decltype(v)>;
+      if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+        emitter << YAML::BeginSeq;
+        for ( const auto& item: v )
+          write_yaml(emitter, item);
+        emitter << YAML::EndSeq;
+      } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+        emitter << YAML::BeginMap;
+        for ( const auto& [key, item]: v ) {
+          emitter << YAML::Key << key << YAML::Value;
+          write_yaml(emitter, item);
+        }
+        emitter << YAML::EndMap;
+      } else {
+        emitter << v;
+      }
+    }, value);
   }
 
   static nlohmann::json to_json (const parameter_t& value) {
-    return std::visit(
-        [] (const auto& v) -> nlohmann::json {
-          using T = std::decay_t<decltype(v)>;
-          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
-            nlohmann::json array = nlohmann::json::array( );
-            for ( const auto& item: v )
-              array.push_back(to_json(item));
-            return array;
-          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
-            nlohmann::json object = nlohmann::json::object( );
-            for ( const auto& [key, item]: v )
-              object[key] = to_json(item);
-            return object;
-          } else {
-            return v;
-          }
-        },
-        value);
+    return std::visit([] (const auto& v) -> nlohmann::json {
+      using T = std::decay_t<decltype(v)>;
+      if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+        nlohmann::json array = nlohmann::json::array( );
+        for ( const auto& item: v )
+          array.push_back(to_json(item));
+        return array;
+      } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+        nlohmann::json object = nlohmann::json::object( );
+        for ( const auto& [key, item]: v )
+          object[key] = to_json(item);
+        return object;
+      } else {
+        return v;
+      }
+    }, value);
   }
 
 #if USE_TINYXML2
   static void write_xml (tinyxml2::XMLPrinter& printer, const parameter_t& value) {
-    std::visit(
-        [&printer] (const auto& v) {
-          using T = std::decay_t<decltype(v)>;
-          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
-            for ( const auto& item: v ) {
-              printer.OpenElement("item");
-              write_xml(printer, item);
-              printer.CloseElement( );
-            }
-          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
-            for ( const auto& [key, item]: v ) {
-              printer.OpenElement(key.c_str( ));
-              write_xml(printer, item);
-              printer.CloseElement( );
-            }
-          } else if constexpr ( std::is_same_v<T, std::string> ) {
-            printer.PushText(v.c_str( ));
-          } else {
-            printer.PushText(v);
-          }
-        },
-        value);
+    std::visit([&printer] (const auto& v) {
+      using T = std::decay_t<decltype(v)>;
+      if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+        for ( const auto& item: v ) {
+          printer.OpenElement("item");
+          write_xml(printer, item);
+          printer.CloseElement( );
+        }
+      } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+        for ( const auto& [key, item]: v ) {
+          printer.OpenElement(key.c_str( ));
+          write_xml(printer, item);
+          printer.CloseElement( );
+        }
+      } else if constexpr ( std::is_same_v<T, std::string> ) {
+        printer.PushText(v.c_str( ));
+      } else {
+        printer.PushText(v);
+      }
+    }, value);
   }
 #endif
 
@@ -406,9 +426,3 @@ private:
     return {body_, headers_};
   }
 };
-
-void field_new_handler(SessionPtr session);
-void field_size_handler(SessionPtr session);
-void field_bombs_handler(SessionPtr session);
-void action_reveal_handler(SessionPtr session);
-void action_flag_handler(SessionPtr session);

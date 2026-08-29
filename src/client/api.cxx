@@ -110,3 +110,37 @@ flag_result_t client_api_t::action_flag (client_id_t id, int x, int y) {
   result.flagged = json.at("flagged").get<bool>( );
   return result;
 }
+
+std::optional<bool> client_api_t::field_fully_revealed (client_id_t id) {
+  const http_response_t response = http_.get("/field/fully_revealed", {{"id", std::to_string(id)}});
+  if ( !response.ok ) {
+    SPDLOG_ERROR("field/fully_revealed failed: status {}, body {}", response.status, response.body);
+    return std::nullopt;
+  }
+
+  const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
+  if ( json.is_discarded( ) || !json.contains("fully_revealed") ) {
+    return std::nullopt;
+  }
+  return json.at("fully_revealed").get<bool>( );
+}
+
+check_result_t client_api_t::action_check (client_id_t id) {
+  check_result_t result;
+  const http_response_t response = http_.post("/action/check", {{"id", std::to_string(id)}});
+
+  const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
+  if ( !response.ok ) {
+    result.error = ( !json.is_discarded( ) && json.contains("error") ) ? json.at("error").get<std::string>( ) : response.body;
+    return result;
+  }
+
+  if ( json.is_discarded( ) || !json.contains("status") ) {
+    result.error = "malformed response";
+    return result;
+  }
+
+  result.ok  = true;
+  result.win = json.at("status").get<std::string>( ) == "win";
+  return result;
+}

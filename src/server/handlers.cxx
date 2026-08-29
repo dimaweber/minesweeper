@@ -1,10 +1,10 @@
+#include "handlers.hxx"
+
 #include <corvusoft/restbed/request.hpp>
 #include <deque>
 #include <set>
 #include <tuple>
 #include <wbr/string_manipulations.hxx>
-
-#include "api.hxx"
 
 extern addon_api_t api;
 
@@ -93,9 +93,39 @@ void field_bombs_handler (SessionPtr session) {
     return r.send_error(400, content_type, "client not found");
   }
 
-  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", id, field->bombs_left(), field->bombs_total(  ));
+  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", id, field->bombs_count( ), field->bombs_total( ));
 
-  r.add_field("bombs", field->bombs_left()).add_field("total", field->bombs_total(  ));
+  r.add_field("bombs", field->bombs_count( )).add_field("total", field->bombs_total( ));
+  return r.send(200, content_type);
+}
+
+void field_fully_revealed_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* field = api.field_for_client(id);
+  if ( !field ) {
+    return r.send_error(400, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", id, field->unrevealed_count( ));
+
+  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ));
   return r.send(200, content_type);
 }
 
@@ -276,15 +306,61 @@ void action_flag_handler (SessionPtr session) {
     return r.send_error(400, content_type, "invalid parameter y");
   }
 
-  if (field.is_revealed(x, y)) {
+  if ( field.is_revealed(x, y) ) {
     return r.send_error(400, content_type, "can't flag revealed cell");
   }
 
-  if (!field.is_flag(x, y) && field.bombs_left(  )== 0) {
+  if ( !field.is_flag(x, y) && field.bombs_count( ) == 0 ) {
     return r.send_error(400, content_type, "can't flag cell when no bombs left");
   }
 
   field.toggle_flag(x, y);
   r.add_field("status", "ok").add_field("x", x).add_field("y", y).add_field("flagged", field.is_flag(x, y));
+  return r.send(200, content_type);
+}
+
+void action_check_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const auto content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* ptr = api.field_for_client(id);
+
+  if ( ptr == nullptr ) {
+    return r.send_error(404, content_type, "client not found");
+  }
+
+  field_t& field = *ptr;
+
+  // Mines are never revealed by normal play (only flagged) -- the only way a mine
+  // gets its "revealed" bit set is via a boom. So "fully revealed" (matching
+  // field_fully_revealed_handler's own definition) means exactly bombs_total()
+  // cells remain unrevealed, not zero.
+  if ( field.unrevealed_count( ) != field.bombs_total( ) ) {
+    return r.send_error(400, content_type, "can't check field when unrevealed cells are left");
+  }
+  // A cell is "bad" (loses the game) if it's a mine that either wasn't flagged
+  // or got revealed (boomed). A win means none of the mines are bad.
+  const bool ok = std::ranges::none_of(field.data_, [] (u_short cell) {
+    return field_t::is_boom(cell) && ( !field_t::is_flag(cell) || field_t::is_revealed(cell) );
+  });
+  if ( ok )
+    r.add_field("status", "win");
+  else
+    r.add_field("status", "lose");
   return r.send(200, content_type);
 }
