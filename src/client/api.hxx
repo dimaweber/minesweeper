@@ -3,17 +3,24 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "http.hxx"
 
 using client_id_t = uint64_t;
 using field_id_t  = uint64_t;
 
+struct revealed_cell_t {
+  int x {0};
+  int y {0};
+  int count {0};
+};
+
 struct reveal_result_t {
-  bool        ok {false};
-  bool        boom {false};
-  int         count {0};
-  std::string error;
+  bool                        ok {false};
+  bool                        boom {false};
+  std::vector<revealed_cell_t> cells;
+  std::string                 error;
 };
 
 struct flag_result_t {

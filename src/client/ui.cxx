@@ -110,8 +110,14 @@ namespace {
         draw_cell_box(base_row, base_col, selected);
 
         const cell_t& cell = board.at(bx + 1, by + 1);
+        const bool    bold = cell.state == cell_state_t::flagged ||
+                              (cell.state == cell_state_t::revealed && cell.count > 0);
         attron(COLOR_PAIR(color_for(cell)));
+        if ( bold )
+          attron(A_BOLD);
         mvaddch(base_row + CELL_HEIGHT / 2, base_col + CELL_WIDTH / 2, symbol_for(cell));
+        if ( bold )
+          attroff(A_BOLD);
         attroff(COLOR_PAIR(color_for(cell)));
       }
     }
@@ -183,13 +189,17 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else if ( result.boom ) {
-            board.at(cursor_x, cursor_y).state = cell_state_t::boom;
+            for ( const auto& cell: result.cells ) {
+              board.at(cell.x, cell.y).state = cell_state_t::boom;
+            }
             draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "Boom! Game over. Press any key to exit.");
             getch( );
             game_over = true;
           } else {
-            board.at(cursor_x, cursor_y).state = cell_state_t::revealed;
-            board.at(cursor_x, cursor_y).count = result.count;
+            for ( const auto& cell: result.cells ) {
+              board.at(cell.x, cell.y).state = cell_state_t::revealed;
+              board.at(cell.x, cell.y).count = cell.count;
+            }
           }
           break;
         }

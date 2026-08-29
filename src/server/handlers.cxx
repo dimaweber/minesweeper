@@ -1,4 +1,7 @@
 #include <corvusoft/restbed/request.hpp>
+#include <deque>
+#include <set>
+#include <tuple>
 #include <wbr/string_manipulations.hxx>
 
 #include "api.hxx"
@@ -135,6 +138,21 @@ void action_reveal_handler (SessionPtr session) {
     return r.send_error(400, content_type, "invalid parameter y");
   }
 
+  // Counts the bombs among the 8 cells surrounding (cx, cy).
+  const auto count_neighbor_bombs = [&field] (int cx, int cy) {
+    const std::initializer_list<std::pair<int, int>> neighbors = {
+        {cx - 1, cy - 1},
+        {cx,     cy - 1},
+        {cx + 1, cy - 1},
+        {cx - 1, cy    },
+        {cx + 1, cy    },
+        {cx - 1, cy + 1},
+        {cx,     cy + 1},
+        {cx + 1, cy + 1}
+    };
+    return std::ranges::count_if(neighbors, [&field] (const auto& p) { return field.is_boom(p); });
+  };
+
   try {
     if ( field.is_flag(x, y) ) {
       return r.send_error(400, content_type, "can't reveal flagged cell");
@@ -144,22 +162,75 @@ void action_reveal_handler (SessionPtr session) {
     }
     field.reveal(x, y);
     if ( field.is_boom(x, y) ) {
-      // boom
-      r.add_field("status", "boom").add_field("x", x).add_field("y", y);
-    } else {
-      const std::initializer_list<std::pair<int, int>> neighbors = {
-          {x - 1, y - 1},
-          {x,     y - 1},
-          {x + 1, y - 1},
-          {x - 1, y    },
-          {x + 1, y    },
-          {x - 1, y + 1},
-          {x,     y + 1},
-          {x + 1, y + 1}
-      };
-      const uint count = std::ranges::count_if(neighbors, [&field] (const auto& p) { return field.is_boom(p); });
-      r.add_field("status", "ok").add_field("count", count).add_field("x", x).add_field("y", y);
+      // boom -- still returned as a (single-element) cells array, for API uniformity.
+      parameter_map_t cell;
+      cell.emplace("x", x);
+      cell.emplace("y", y);
+      r.add_field("status", "boom").add_field("cells", parameter_list_t {cell});
+      return r.send(200, content_type);
     }
+
+    // Auto-reveal: opening a cell with 0 neighbouring mines recursively opens all
+    // of its neighbours (and, transitively, their neighbours), but this flood-fill
+    // can never open a mine. This is implemented here at the handler level (rather
+    // than inside field_t) so field_t keeps a single simple reveal() primitive, and
+    // a future "plain" (non-auto) reveal endpoint could reuse it unchanged.
+    std::vector<std::tuple<int, int, uint>> revealed;
+    std::set<std::pair<int, int>>           visited;
+
+    const uint count = count_neighbor_bombs(x, y);
+    revealed.emplace_back(x, y, count);
+    visited.emplace(x, y);
+
+    if ( count == 0 ) {
+      std::deque<std::pair<int, int>> queue;
+      queue.emplace_back(x, y);
+
+      while ( !queue.empty( ) ) {
+        const auto [cx, cy] = queue.front( );
+        queue.pop_front( );
+
+        const std::initializer_list<std::pair<int, int>> neighbors = {
+            {cx - 1, cy - 1},
+            {cx,     cy - 1},
+            {cx + 1, cy - 1},
+            {cx - 1, cy    },
+            {cx + 1, cy    },
+            {cx - 1, cy + 1},
+            {cx,     cy + 1},
+            {cx + 1, cy + 1}
+        };
+
+        for ( const auto& [nx, ny]: neighbors ) {
+          if ( nx < 1 || nx > static_cast<int>(field.w_) || ny < 1 || ny > static_cast<int>(field.h_) )
+            continue;
+          if ( !visited.emplace(nx, ny).second )
+            continue;
+          if ( field.is_flag(nx, ny) || field.is_revealed(nx, ny) || field.is_boom(nx, ny) )
+            continue;
+
+          field.reveal(nx, ny);
+          const uint n_count = count_neighbor_bombs(nx, ny);
+          revealed.emplace_back(nx, ny, n_count);
+          if ( n_count == 0 )
+            queue.emplace_back(nx, ny);
+        }
+      }
+    }
+
+    // Always return an array of cells, even when only one cell got revealed --
+    // this keeps the response shape uniform (and simplifies both server and
+    // client code), instead of special-casing the single-cell result.
+    parameter_list_t cells;
+    cells.reserve(revealed.size( ));
+    for ( const auto& [rx, ry, rc]: revealed ) {
+      parameter_map_t cell;
+      cell.emplace("x", rx);
+      cell.emplace("y", ry);
+      cell.emplace("count", rc);
+      cells.emplace_back(cell);
+    }
+    r.add_field("status", "ok").add_field("cells", cells);
     return r.send(200, content_type);
   } catch ( std::out_of_range& e ) {
     return r.send_error(400, content_type, "coordinates out of range");

@@ -76,8 +76,16 @@ reveal_result_t client_api_t::action_reveal (client_id_t id, int x, int y) {
 
   result.ok   = true;
   result.boom = json.at("status").get<std::string>( ) == "boom";
-  if ( !result.boom && json.contains("count") ) {
-    result.count = json.at("count").get<int>( );
+  if ( json.contains("cells") ) {
+    for ( const auto& c: json.at("cells") ) {
+      revealed_cell_t cell;
+      cell.x = c.at("x").get<int>( );
+      cell.y = c.at("y").get<int>( );
+      if ( !result.boom && c.contains("count") ) {
+        cell.count = c.at("count").get<int>( );
+      }
+      result.cells.push_back(cell);
+    }
   }
   return result;
 }

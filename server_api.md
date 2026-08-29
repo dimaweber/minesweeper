@@ -206,7 +206,11 @@ bombs on the field.
 
 ### `POST /action/reveal`
 
-Reveals a cell on the field.
+Reveals a cell on the field. If the revealed cell has 0 mines among its 8 neighbors,
+this automatically (recursively) reveals all of its neighbors too, and so on for any
+of those neighbors that also turn out to have 0 neighboring mines. This auto-reveal
+flood-fill is implemented at the handler level (not inside the field storage class
+itself), and it will never automatically reveal a cell that contains a mine.
 
 **Handler:** `action_reveal_handler`
 
@@ -221,26 +225,36 @@ Reveals a cell on the field.
 
 **Success response `200`:**
 
-- If the revealed cell contains a mine:
+The response always contains a `cells` array — even when only a single cell got
+revealed (a plain reveal or a boom) — so the response shape is uniform regardless of
+whether the auto-reveal flood-fill triggered or not:
 
-  | Field    | Description        |
-  |----------|----------------------|
-  | `status` | `"boom"` — game over. |
-  | `x`      | Column of the revealed cell. |
-  | `y`      | Row of the revealed cell.    |
+| Field    | Description                                                                          |
+|----------|-----------------------------------------------------------------------------------------|
+| `status` | `"ok"`, or `"boom"` if the revealed cell contained a mine (game over).                  |
+| `cells`  | Array of one or more `{"x": ..., "y": ..., "count": ...}` objects. For `"boom"`, the array always has exactly one element and it has no `count` field. For `"ok"`, the array has one element for a plain reveal (1+ neighboring mines, or the cell was already revealed), or multiple elements — including the originally requested cell — when the auto-reveal flood-fill opened several connected zero-count cells. |
 
-- Otherwise:
+If the cell was already revealed before this call, an additional field
+`"info": "already revealed"` is included in the response (the cell is revealed again,
+which is a no-op).
 
-  | Field    | Description                                                        |
-  |----------|-----------------------------------------------------------------------|
-  | `status` | `"ok"`.                                                                |
-  | `count`  | Number of mines among the 8 neighboring cells.                        |
-  | `x`      | Column of the revealed cell.                                          |
-  | `y`      | Row of the revealed cell.                                             |
-
-  If the cell was already revealed before this call, an additional field
-  `"info": "already revealed"` is included in the response (the cell is revealed again,
-  which is a no-op).
+Examples (`format=json`):
+```json
+{"status": "boom", "cells": [{"x": 3, "y": 4}]}
+```
+```json
+{"status": "ok", "cells": [{"x": 3, "y": 4, "count": 2}]}
+```
+```json
+{
+  "status": "ok",
+  "cells": [
+    {"x": 3, "y": 4, "count": 0},
+    {"x": 4, "y": 4, "count": 1},
+    {"x": 3, "y": 5, "count": 1}
+  ]
+}
+```
 
 **Errors:**
 
