@@ -193,7 +193,146 @@ struct addon_api_t {
 using SessionPtr  = std::shared_ptr<restbed::Session>;
 using ResourcePtr = std::shared_ptr<restbed::Resource>;
 using headers_t   = std::multimap<std::string, std::string>;
-using parameter_t = std::variant<std::string, int, uint, long, ulong, bool>;
+
+// A parameter is either a scalar value, an array of parameters of the same
+// (recursive) type (arrays of arrays are allowed), or a map of named
+// parameters of the same (recursive) type (maps of maps/arrays, and vice
+// versa, are allowed too). This is implemented as a variant deriving struct
+// so that `std::vector<parameter_t>` / `std::unordered_map<std::string,
+// parameter_t>` can appear as alternatives of `parameter_t` itself (allowed
+// since C++17 relaxed the incomplete-type requirements for `std::vector`;
+// libstdc++'s node-based `std::unordered_map` supports incomplete mapped
+// types the same way in practice).
+struct parameter_t
+    : std::variant<std::string, int, uint, long, ulong, bool, std::vector<parameter_t>,
+                   std::unordered_map<std::string, parameter_t>> {
+  using variant::variant;
+};
+
+using parameter_list_t = std::vector<parameter_t>;
+using parameter_map_t  = std::unordered_map<std::string, parameter_t>;
+
+// Recursive serialization of parameter_t values into each supported wire
+// format. Extracted out of response_t so the (array-aware) recursion lives
+// in one place instead of being duplicated per-format inside response_body.
+struct parameter_serializer_t {
+  static void write_yaml (YAML::Emitter& emitter, const parameter_t& value) {
+    std::visit(
+        [&emitter] (const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+            emitter << YAML::BeginSeq;
+            for ( const auto& item: v )
+              write_yaml(emitter, item);
+            emitter << YAML::EndSeq;
+          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+            emitter << YAML::BeginMap;
+            for ( const auto& [key, item]: v ) {
+              emitter << YAML::Key << key << YAML::Value;
+              write_yaml(emitter, item);
+            }
+            emitter << YAML::EndMap;
+          } else {
+            emitter << v;
+          }
+        },
+        value);
+  }
+
+  static nlohmann::json to_json (const parameter_t& value) {
+    return std::visit(
+        [] (const auto& v) -> nlohmann::json {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+            nlohmann::json array = nlohmann::json::array( );
+            for ( const auto& item: v )
+              array.push_back(to_json(item));
+            return array;
+          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+            nlohmann::json object = nlohmann::json::object( );
+            for ( const auto& [key, item]: v )
+              object[key] = to_json(item);
+            return object;
+          } else {
+            return v;
+          }
+        },
+        value);
+  }
+
+#if USE_TINYXML2
+  static void write_xml (tinyxml2::XMLPrinter& printer, const parameter_t& value) {
+    std::visit(
+        [&printer] (const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+            for ( const auto& item: v ) {
+              printer.OpenElement("item");
+              write_xml(printer, item);
+              printer.CloseElement( );
+            }
+          } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+            for ( const auto& [key, item]: v ) {
+              printer.OpenElement(key.c_str( ));
+              write_xml(printer, item);
+              printer.CloseElement( );
+            }
+          } else if constexpr ( std::is_same_v<T, std::string> ) {
+            printer.PushText(v.c_str( ));
+          } else {
+            printer.PushText(v);
+          }
+        },
+        value);
+  }
+#endif
+
+  static std::string serialize (content_type_t content_type, const parameter_map_t& m) {
+    switch ( content_type ) {
+      case content_type_t::yaml:
+        {
+          if constexpr ( !USE_YAML_CPP ) {
+            SPDLOG_ERROR("yaml format requested, but yaml-cpp support was not compiled in");
+            return std::string { };
+          }
+          YAML::Emitter emitter;
+          emitter << YAML::BeginMap;
+          for ( const auto& [key, value]: m ) {
+            emitter << YAML::Key << key << YAML::Value;
+            write_yaml(emitter, value);
+          }
+          emitter << YAML::EndMap;
+          return emitter.c_str( );
+        }
+      case content_type_t::json:
+        {
+          nlohmann::json json_body;
+          for ( const auto& [key, value]: m ) {
+            json_body[key] = to_json(value);
+          }
+          return json_body.dump( );
+        }
+      case content_type_t::xml:
+        {
+          if constexpr ( !USE_TINYXML2 ) {
+            SPDLOG_ERROR("xml format requested, but tinyxml2 support was not compiled in");
+            return std::string { };
+          }
+
+          tinyxml2::XMLPrinter printer;
+          printer.OpenElement("response");
+          for ( const auto& [key, value]: m ) {
+            printer.OpenElement(key.c_str( ));
+            write_xml(printer, value);
+            printer.CloseElement( );
+          }
+          printer.CloseElement( );
+          return printer.CStr( );
+        }
+    }
+    return std::string { };
+  }
+};
 
 class response_t {
 public:
@@ -246,62 +385,12 @@ public:
   }
 
 private:
-  SessionPtr                                   session_;
-  std::unordered_map<std::string, parameter_t> fields_;
-  headers_t                                    headers_;
+  SessionPtr      session_;
+  parameter_map_t fields_;
+  headers_t       headers_;
 
-  std::string response_body (content_type_t content_type, const std::unordered_map<std::string, parameter_t>& m) {
-    switch ( content_type ) {
-      case content_type_t::yaml:
-        {
-          if constexpr ( !USE_YAML_CPP ) {
-            SPDLOG_ERROR("yaml format requested, but yaml-cpp support was not compiled in");
-            return std::string { };
-          }
-          YAML::Emitter emitter;
-          emitter << YAML::BeginMap;
-          for ( const auto& [key, value]: m ) {
-            std::visit([&emitter, &key] (const auto& v) { emitter << YAML::Key << key << YAML::Value << v; }, value);
-          }
-          emitter << YAML::EndMap;
-          return emitter.c_str( );
-        }
-      case content_type_t::json:
-        {
-          nlohmann::json json_body;
-          for ( const auto& [key, value]: m ) {
-            std::visit([&json_body, &key] (const auto& v) { json_body[key] = v; }, value);
-          }
-          return json_body.dump( );
-        }
-      case content_type_t::xml:
-        {
-          if constexpr ( !USE_TINYXML2 ) {
-            SPDLOG_ERROR("xml format requested, but tinyxml2 support was not compiled in");
-            return std::string { };
-          }
-
-          tinyxml2::XMLPrinter printer;
-          printer.OpenElement("response");
-          for ( const auto& [key, value]: m ) {
-            printer.OpenElement(key.c_str( ));
-            std::visit(
-                [&printer] (const auto& v) {
-                  using T = std::decay_t<decltype(v)>;
-                  if constexpr ( std::is_same_v<T, std::string> ) {
-                    printer.PushText(v.c_str( ));
-                  } else {
-                    printer.PushText(v);
-                  }
-                },
-                value);
-            printer.CloseElement( );
-          }
-          printer.CloseElement( );
-          return printer.CStr( );
-        }
-    }
-    return std::string { };
+  std::string response_body (content_type_t content_type, const parameter_map_t& m) {
+    return parameter_serializer_t::serialize(content_type, m);
   }
 
   std::pair<std::string, headers_t> body (content_type_t content_type) {

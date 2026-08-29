@@ -35,13 +35,47 @@ Example JSON body:
 ```json
 {
   "status": "ok",
-  "x": "3",
-  "y": "4"
+  "x": 3,
+  "y": 4
 }
 ```
 
-Note: all values are serialized as strings, regardless of their original type
-(numbers, booleans, etc.).
+Values are serialized using their native type (numbers as numbers, booleans as
+booleans, strings as strings).
+
+A field value can also be an **array of values of the same kind**, or a **map of named
+values of the same kind**, and both can be nested arbitrarily (arrays of arrays, maps of
+maps, arrays containing maps, maps containing arrays, etc.), recursively. This is not
+used by any endpoint today, but the underlying `parameter_t`/`parameter_serializer_t`
+(see `src/server/api.hxx`) support it for future API extensions. Arrays are serialized
+as a JSON/YAML array, or in XML as a sequence of `<item>` elements (nested arrays produce
+nested `<item>` elements); maps are serialized as a JSON/YAML object/map, or in XML as
+one child element per map key (nested maps produce nested child elements), e.g.:
+```json
+{
+  "values": [1, 2, ["a", true]],
+  "info": {"name": "foo", "tags": [1, 2]}
+}
+```
+```xml
+<response>
+    <values>
+        <item>1</item>
+        <item>2</item>
+        <item>
+            <item>a</item>
+            <item>true</item>
+        </item>
+    </values>
+    <info>
+        <name>foo</name>
+        <tags>
+            <item>1</item>
+            <item>2</item>
+        </tags>
+    </info>
+</response>
+```
 
 ### Errors
 
