@@ -1,0 +1,43 @@
+#pragma once
+
+#include <cstdint>
+#include <optional>
+#include <string>
+
+#include "http.hxx"
+
+using client_id_t = uint64_t;
+using field_id_t  = uint64_t;
+
+struct reveal_result_t {
+  bool        ok {false};
+  bool        boom {false};
+  int         count {0};
+  std::string error;
+};
+
+struct flag_result_t {
+  bool        ok {false};
+  bool        flagged {false};
+  std::string error;
+};
+
+struct bombs_result_t {
+  bool ok {false};
+  int  left {0};
+  int  total {0};
+};
+
+class client_api_t {
+public:
+  client_api_t (std::string host, uint16_t port);
+
+  [[nodiscard]] std::optional<client_id_t> field_new (std::optional<field_id_t> field_id = std::nullopt);
+  [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> field_size (client_id_t id);
+  [[nodiscard]] bombs_result_t field_bombs (client_id_t id);
+  [[nodiscard]] reveal_result_t action_reveal (client_id_t id, int x, int y);
+  [[nodiscard]] flag_result_t action_flag (client_id_t id, int x, int y);
+
+private:
+  http_client_t http_;
+};
