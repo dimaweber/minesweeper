@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(TARGET_SERVER "ms_server")
+set(TARGET_CLIENT "ms_client")
 set(TARGET_SOLVER "ms_solver")
 set(TARGET_GENERATOR "ms_generator")
 set(TARGET_COMMON "ms_lib")
@@ -18,9 +19,11 @@ set(SPDLOG_FMT_EXTERNAL ON)
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(yaml-cpp)
+find_package(tinyxml2)
 find_package(CLI11)
 find_package(static_vector)
 find_package(Curses)
+find_package(CURL)
 find_package(Boost)
 find_package(OpenSSL)
 find_package(PalSigslot)
@@ -37,6 +40,13 @@ endif ()
 if (CURSES_FOUND)
     message(STATUS "Curses library found: ${CURSES_VERSION}")
     add_compile_definitions(USE_CURSES=1)
+    if (NOT TARGET Curses::Curses)
+        add_library(Curses::Curses INTERFACE IMPORTED)
+        set_target_properties(Curses::Curses PROPERTIES
+                INTERFACE_LINK_LIBRARIES "${CURSES_LIBRARIES}"
+                INTERFACE_INCLUDE_DIRECTORIES "${CURSES_INCLUDE_DIRS}"
+        )
+    endif ()
 else ()
     message(WARNING "Curses library not found. Some features may be disabled.")
     add_compile_definitions(USE_CURSES=0)
@@ -80,6 +90,14 @@ if (yaml-cpp_FOUND)
 else ()
     message(WARNING "yaml-cpp library not found. Some features may be disabled.")
     add_compile_definitions(USE_YAML_CPP=0)
+endif ()
+
+if (tinyxml2_FOUND)
+    message(STATUS "tinyxml2 library found: ${tinyxml2_VERSION}")
+    add_compile_definitions(USE_TINYXML2=1)
+else ()
+    message(WARNING "tinyxml2 library not found. Some features may be disabled.")
+    add_compile_definitions(USE_TINYXML2=0)
 endif ()
 
 if (static_vector_FOUND)
@@ -157,6 +175,14 @@ set(SOURCES_COMMON
 
 set(SOURCES_SERVER
         src/server/server.cxx
+        src/server/handlers.cxx
+)
+
+set(SOURCES_CLIENT
+        src/client/client.cxx
+        src/client/http.cxx
+        src/client/api.cxx
+        src/client/ui.cxx
 )
 
 set(SOURCES_SOLVER
@@ -172,11 +198,21 @@ target_link_libraries(${TARGET_COMMON} PUBLIC fmt::fmt spdlog::spdlog yaml-cpp::
 
 add_executable(${TARGET_SERVER} ${SOURCES_SERVER})
 target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
+if (tinyxml2_FOUND)
+    target_link_libraries(${TARGET_SERVER} PRIVATE tinyxml2::tinyxml2)
+endif ()
 if (PalSigslot_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE Pal::Sigslot)
 endif ()
 if (PKGCONFIG_restbed_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE PkgConfig::restbed)
+endif ()
+
+if (CURSES_FOUND AND CURL_FOUND)
+    add_executable(${TARGET_CLIENT} ${SOURCES_CLIENT})
+    target_link_libraries(${TARGET_CLIENT} PRIVATE fmt::fmt spdlog::spdlog CLI11::CLI11 nlohmann_json::nlohmann_json ${TARGET_COMMON} Curses::Curses CURL::libcurl)
+else ()
+    message(WARNING "Curses and/or CURL not found. Skipping ${TARGET_CLIENT} target.")
 endif ()
 
 add_executable(${TARGET_SOLVER} ${SOURCES_SOLVER})

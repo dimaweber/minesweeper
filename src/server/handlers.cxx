@@ -1,0 +1,219 @@
+#include <corvusoft/restbed/request.hpp>
+#include <wbr/string_manipulations.hxx>
+
+#include "api.hxx"
+
+extern addon_api_t api;
+
+void field_new_handler (SessionPtr session) {
+  const auto        request      = session->get_request( );
+  const std::string format_str   = request->get_query_parameter("format", "json");
+  const std::string field_id_str = request->get_query_parameter("field_id", "");
+
+  const content_type_t content_type = to_content_type(format_str);
+  field_id_t           field_id {0};
+
+  response_t r(session);
+
+  if ( !field_id_str.empty( ) ) {
+    std::errc ec;
+    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
+    if ( ec != std::errc { } ) {
+      return r.send_error(400, content_type, "invalid field_id parameter");
+    }
+  } else {
+    field_id = rand( ) % api.fields.size( );
+  }
+
+  const std::optional<client_id_t> id = api.add_new_client(field_id);
+  if ( !id ) {
+    return r.send_error(500, content_type, "failed to create new client");
+  }
+
+  SPDLOG_DEBUG("Created new client with id {}", *id);
+
+  r.add_field("client_id", *id);
+  return r.send(200, content_type);
+}
+
+void field_size_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* field = api.field_for_client(id);
+  if ( !field ) {
+    return r.send_error(400, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Size request for client {}: {}x{}", id, field->w_, field->h_);
+
+  r.add_field("width", field->w_).add_field("height", field->h_);
+  return r.send(200, content_type);
+}
+
+void field_bombs_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* field = api.field_for_client(id);
+  if ( !field ) {
+    return r.send_error(400, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", id, field->bombs_left(), field->bombs_total(  ));
+
+  r.add_field("bombs", field->bombs_left()).add_field("total", field->bombs_total(  ));
+  return r.send(200, content_type);
+}
+
+void action_reveal_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string x_str   = request->get_query_parameter("x", "");
+  const std::string y_str   = request->get_query_parameter("y", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const auto content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) || x_str.empty( ) || y_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id, x or y");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* ptr = api.field_for_client(id);
+
+  if ( ptr == nullptr ) {
+    return r.send_error(404, content_type, "client not found");
+  }
+
+  field_t& field = *ptr;
+
+  const auto x = wbr::str::num<int, wbr::str::num_match_t::full>(x_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter x");
+  }
+
+  const auto y = wbr::str::num<int, wbr::str::num_match_t::full>(y_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter y");
+  }
+
+  try {
+    if ( field.is_flag(x, y) ) {
+      return r.send_error(400, content_type, "can't reveal flagged cell");
+    }
+    if ( field.is_revealed(x, y) ) {
+      r.add_field("info", "already revealed");
+    }
+    field.reveal(x, y);
+    if ( field.is_boom(x, y) ) {
+      // boom
+      r.add_field("status", "boom").add_field("x", x).add_field("y", y);
+    } else {
+      const std::initializer_list<std::pair<int, int>> neighbors = {
+          {x - 1, y - 1},
+          {x,     y - 1},
+          {x + 1, y - 1},
+          {x - 1, y    },
+          {x + 1, y    },
+          {x - 1, y + 1},
+          {x,     y + 1},
+          {x + 1, y + 1}
+      };
+      const uint count = std::ranges::count_if(neighbors, [&field] (const auto& p) { return field.is_boom(p); });
+      r.add_field("status", "ok").add_field("count", count).add_field("x", x).add_field("y", y);
+    }
+    return r.send(200, content_type);
+  } catch ( std::out_of_range& e ) {
+    return r.send_error(400, content_type, "coordinates out of range");
+  }
+}
+
+void action_flag_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string id_str  = request->get_query_parameter("id", "");
+  const std::string x_str   = request->get_query_parameter("x", "");
+  const std::string y_str   = request->get_query_parameter("y", "");
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const auto content_type = to_content_type(format);
+
+  response_t r {session};
+
+  if ( id_str.empty( ) || x_str.empty( ) || y_str.empty( ) ) {
+    return r.send_error(400, content_type, "missing mandatory parameter id, x or y");
+  }
+
+  std::errc         ec;
+  const client_id_t id = wbr::str::num<client_id_t, wbr::str::num_match_t::full>(id_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter id");
+  }
+
+  field_t* ptr = api.field_for_client(id);
+
+  if ( ptr == nullptr ) {
+    return r.send_error(404, content_type, "client not found");
+  }
+
+  field_t& field = *ptr;
+
+  const auto x = wbr::str::num<int, wbr::str::num_match_t::full>(x_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter x");
+  }
+
+  const auto y = wbr::str::num<int, wbr::str::num_match_t::full>(y_str, ec);
+  if ( ec != std::errc { } ) {
+    return r.send_error(400, content_type, "invalid parameter y");
+  }
+
+  if (field.is_revealed(x, y)) {
+    return r.send_error(400, content_type, "can't flag revealed cell");
+  }
+
+  if (!field.is_flag(x, y) && field.bombs_left(  )== 0) {
+    return r.send_error(400, content_type, "can't flag cell when no bombs left");
+  }
+
+  field.toggle_flag(x, y);
+  r.add_field("status", "ok").add_field("x", x).add_field("y", y).add_field("flagged", field.is_flag(x, y));
+  return r.send(200, content_type);
+}
