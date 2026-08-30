@@ -99,7 +99,7 @@ checked while dereferencing the field.
 ### Session / client model
 
 A "client" represents a single player session bound to one field (board). A client is
-created via `POST /field/new` and is identified afterwards by the `id` (`client_id`)
+created via `POST /session/new` and is identified afterwards by the `id` (`client_id`)
 returned in that response. This `id` must be passed as the `id` query parameter to all
 other endpoints.
 
@@ -115,7 +115,7 @@ by, other clients bound to the same `field_id`.
 
 ## Endpoints
 
-### `POST /field/new`
+### `POST /session/new`
 
 Creates a new client (game session) bound to a field.
 
@@ -153,7 +153,7 @@ Returns the dimensions of the field associated with a client.
 
 | Name     | Required | Description                          |
 |----------|----------|---------------------------------------|
-| `id`     | yes      | Client id, obtained from `/field/new`.|
+| `id`     | yes      | Client id, obtained from `/session/new`.|
 | `format` | no       | Response format (`json`\|`yaml`\|`xml`), default `json`. |
 
 **Success response `200`:**
@@ -182,9 +182,9 @@ bombs on the field.
 
 **Query parameters:**
 
-| Name     | Required | Description                          |
-|----------|----------|---------------------------------------|
-| `id`     | yes      | Client id, obtained from `/field/new`.|
+| Name     | Required | Description                                              |
+|----------|----------|----------------------------------------------------------|
+| `id`     | yes      | Client id, obtained from `/session/new`.                 |
 | `format` | no       | Response format (`json`\|`yaml`\|`xml`), default `json`. |
 
 **Success response `200`:**
@@ -204,7 +204,7 @@ bombs on the field.
 
 ---
 
-### `POST /action/reveal`
+### `POST /cell/reveal`
 
 Reveals a cell on the field. If the revealed cell has 0 mines among its 8 neighbors,
 this automatically (recursively) reveals all of its neighbors too, and so on for any
@@ -212,7 +212,7 @@ of those neighbors that also turn out to have 0 neighboring mines. This auto-rev
 flood-fill is implemented at the handler level (not inside the field storage class
 itself), and it will never automatically reveal a cell that contains a mine.
 
-**Handler:** `action_reveal_handler`
+**Handler:** `cell_reveal_handler`
 
 **Query parameters:**
 
@@ -270,11 +270,11 @@ Examples (`format=json`):
 
 ---
 
-### `POST /action/flag`
+### `POST /cell/flag`
 
 Toggles a flag on a cell (marks/unmarks it as a suspected mine).
 
-**Handler:** `action_flag_handler`
+**Handler:** `cell_flag_handler`
 
 **Query parameters:**
 
@@ -310,9 +310,9 @@ Toggles a flag on a cell (marks/unmarks it as a suspected mine).
 
 ## Typical flow
 
-1. `POST /field/new[?field_id=<id>]` → obtain `client_id`.
+1. `POST /session/new[?field_id=<id>]` → obtain `client_id`.
 2. `GET /field/size?id=<client_id>` → obtain field dimensions to render the board.
 3. `GET /field/bombs?id=<client_id>` → display remaining bomb count.
-4. `POST /action/reveal?id=<client_id>&x=<x>&y=<y>` → reveal a cell; repeat until either
+4. `POST /cell/reveal?id=<client_id>&x=<x>&y=<y>` → reveal a cell; repeat until either
    `status` is `"boom"` (game over) or all safe cells have been revealed.
-5. `POST /action/flag?id=<client_id>&x=<x>&y=<y>` → mark/unmark suspected mines.
+5. `POST /cell/flag?id=<client_id>&x=<x>&y=<y>` → mark/unmark suspected mines.

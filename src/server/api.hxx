@@ -131,15 +131,51 @@ struct field_t {
     field_t::toggle_flag(data_[coord_to_index(x, y)]);
   }
 
-  static void reveal (ushort& cell) {
+  static void mark_revealed (ushort& cell) {
     cell |= 0x10;
   }
 
-  void reveal (int x, int y) {
+  void mark_revealed (int x, int y) {
     if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
       return;
-    field_t::reveal(data_[coord_to_index(x, y)]);
+    field_t::mark_revealed(data_[coord_to_index(x, y)]);
   }
+
+  std::vector<std::pair<int, int>> neighbors(int x, int y) const {
+    std::vector<std::pair<int, int>> result;
+    const std::initializer_list<std::pair<int, int>> neighbors = {
+        {x - 1, y - 1},
+        {x,     y - 1},
+        {x + 1, y - 1},
+        {x - 1, y    },
+        {x + 1, y    },
+        {x - 1, y + 1},
+        {x,     y + 1},
+        {x + 1, y + 1}
+    };
+    for ( const auto& p: neighbors ) {
+      if ( p.first >= 1 && p.first <= static_cast<int>(w_) && p.second >= 1 && p.second <= static_cast<int>(h_) ) {
+        result.push_back(p);
+      }
+    }
+    return result;
+  }
+
+  int reveal (int x, int y) {
+    mark_revealed(x, y);
+    return neighbor_bombs_count(x, y);
+  }
+
+  int neighbor_bombs_count (int x, int y) const {
+    if (x<1 || x>static_cast<int>(w_) || y<1 || y>static_cast<int>(h_)) {
+      return -1;
+    }
+    if (is_boom(x, y)) {
+      return -1;
+    }
+    return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return this->is_boom(p); });
+  }
+
 
   [[nodiscard]] int bombs_total ( ) const {
     return std::ranges::count_if(data_, [] (u_short cell) { return field_t::is_boom(cell); });

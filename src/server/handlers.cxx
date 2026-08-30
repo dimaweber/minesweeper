@@ -8,7 +8,7 @@
 
 extern addon_api_t api;
 
-void field_new_handler (SessionPtr session) {
+void session_new_handler (SessionPtr session) {
   const auto        request      = session->get_request( );
   const std::string format_str   = request->get_query_parameter("format", "json");
   const std::string field_id_str = request->get_query_parameter("field_id", "");
@@ -125,11 +125,52 @@ void field_fully_revealed_handler (SessionPtr session) {
 
   SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", id, field->unrevealed_count( ));
 
-  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ));
+  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ) && field->flags_count(  )== field->bombs_total( ));
   return r.send(200, content_type);
 }
 
-void action_reveal_handler (SessionPtr session) {
+struct reveal_result_t {
+  int x, y, count;
+};
+
+std::vector<reveal_result_t> reveal_cells(field_t& field, int x, int y) {
+  std::vector<reveal_result_t> revealed;
+  std::set<std::pair<int, int>> visited;
+
+  if ( field.is_flag(x, y) || field.is_revealed(x, y) || field.is_boom(x, y) ) {
+    return revealed;
+  }
+
+  const int count = field.reveal(x, y);
+  revealed.push_back({x, y, count});
+  visited.emplace(x, y);
+
+  if ( count == 0 ) {
+    std::deque<std::pair<int, int>> queue;
+    queue.emplace_back(x, y);
+
+    while ( !queue.empty( ) ) {
+      const auto [cx, cy] = queue.front( );
+      queue.pop_front( );
+
+      for ( const auto& [nx, ny]: field.neighbors(cx,cy) ) {
+        if ( !visited.emplace(nx, ny).second )
+          continue;
+        if ( field.is_flag(nx, ny) || field.is_revealed(nx, ny) )
+          continue;
+
+        const int n_count = field.reveal(nx, ny);
+        revealed.push_back({nx, ny, n_count});
+        if ( n_count == 0 )
+          queue.emplace_back(nx, ny);
+      }
+    }
+  }
+
+  return revealed;
+}
+
+void cell_reveal_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string id_str  = request->get_query_parameter("id", "");
   const std::string x_str   = request->get_query_parameter("x", "");
@@ -168,21 +209,6 @@ void action_reveal_handler (SessionPtr session) {
     return r.send_error(400, content_type, "invalid parameter y");
   }
 
-  // Counts the bombs among the 8 cells surrounding (cx, cy).
-  const auto count_neighbor_bombs = [&field] (int cx, int cy) {
-    const std::initializer_list<std::pair<int, int>> neighbors = {
-        {cx - 1, cy - 1},
-        {cx,     cy - 1},
-        {cx + 1, cy - 1},
-        {cx - 1, cy    },
-        {cx + 1, cy    },
-        {cx - 1, cy + 1},
-        {cx,     cy + 1},
-        {cx + 1, cy + 1}
-    };
-    return std::ranges::count_if(neighbors, [&field] (const auto& p) { return field.is_boom(p); });
-  };
-
   try {
     if ( field.is_flag(x, y) ) {
       return r.send_error(400, content_type, "can't reveal flagged cell");
@@ -190,7 +216,6 @@ void action_reveal_handler (SessionPtr session) {
     if ( field.is_revealed(x, y) ) {
       r.add_field("info", "already revealed");
     }
-    field.reveal(x, y);
     if ( field.is_boom(x, y) ) {
       // boom -- still returned as a (single-element) cells array, for API uniformity.
       parameter_map_t cell;
@@ -205,60 +230,28 @@ void action_reveal_handler (SessionPtr session) {
     // can never open a mine. This is implemented here at the handler level (rather
     // than inside field_t) so field_t keeps a single simple reveal() primitive, and
     // a future "plain" (non-auto) reveal endpoint could reuse it unchanged.
-    std::vector<std::tuple<int, int, uint>> revealed;
-    std::set<std::pair<int, int>>           visited;
-
-    const uint count = count_neighbor_bombs(x, y);
-    revealed.emplace_back(x, y, count);
-    visited.emplace(x, y);
-
-    if ( count == 0 ) {
-      std::deque<std::pair<int, int>> queue;
-      queue.emplace_back(x, y);
-
-      while ( !queue.empty( ) ) {
-        const auto [cx, cy] = queue.front( );
-        queue.pop_front( );
-
-        const std::initializer_list<std::pair<int, int>> neighbors = {
-            {cx - 1, cy - 1},
-            {cx,     cy - 1},
-            {cx + 1, cy - 1},
-            {cx - 1, cy    },
-            {cx + 1, cy    },
-            {cx - 1, cy + 1},
-            {cx,     cy + 1},
-            {cx + 1, cy + 1}
-        };
-
-        for ( const auto& [nx, ny]: neighbors ) {
-          if ( nx < 1 || nx > static_cast<int>(field.w_) || ny < 1 || ny > static_cast<int>(field.h_) )
-            continue;
-          if ( !visited.emplace(nx, ny).second )
-            continue;
-          if ( field.is_flag(nx, ny) || field.is_revealed(nx, ny) || field.is_boom(nx, ny) )
-            continue;
-
-          field.reveal(nx, ny);
-          const uint n_count = count_neighbor_bombs(nx, ny);
-          revealed.emplace_back(nx, ny, n_count);
-          if ( n_count == 0 )
-            queue.emplace_back(nx, ny);
-        }
-      }
-    }
+    const std::vector<reveal_result_t> revealed = reveal_cells(field, x, y);
 
     // Always return an array of cells, even when only one cell got revealed --
     // this keeps the response shape uniform (and simplifies both server and
     // client code), instead of special-casing the single-cell result.
     parameter_list_t cells;
     cells.reserve(revealed.size( ));
+    bool boomed = false;
     for ( const auto& [rx, ry, rc]: revealed ) {
+      if (rc < 0) {
+        boomed = true;
+      }
       parameter_map_t cell;
       cell.emplace("x", rx);
       cell.emplace("y", ry);
       cell.emplace("count", rc);
+      cell.emplace("bomb", rc <0);
       cells.emplace_back(cell);
+    }
+    if (boomed) {
+      r.add_field("status", "boom").add_field("cells", cells);
+      return r.send(200, content_type);
     }
     r.add_field("status", "ok").add_field("cells", cells);
     return r.send(200, content_type);
@@ -267,7 +260,7 @@ void action_reveal_handler (SessionPtr session) {
   }
 }
 
-void action_flag_handler (SessionPtr session) {
+void cell_flag_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string id_str  = request->get_query_parameter("id", "");
   const std::string x_str   = request->get_query_parameter("x", "");
@@ -319,7 +312,7 @@ void action_flag_handler (SessionPtr session) {
   return r.send(200, content_type);
 }
 
-void action_check_handler (SessionPtr session) {
+void field_check_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string id_str  = request->get_query_parameter("id", "");
   const std::string format  = request->get_query_parameter("format", "json");

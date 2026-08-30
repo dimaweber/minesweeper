@@ -7,13 +7,13 @@
 client_api_t::client_api_t (std::string host, uint16_t port) : http_ {std::move(host), port} {
 }
 
-std::optional<client_id_t> client_api_t::field_new (std::optional<field_id_t> field_id) {
+std::optional<client_id_t> client_api_t::session_new (std::optional<field_id_t> field_id) {
   http_params_t params;
   if ( field_id ) {
     params.emplace_back("field_id", std::to_string(*field_id));
   }
 
-  const http_response_t response = http_.post("/field/new", params);
+  const http_response_t response = http_.post("/session/new", params);
   if ( !response.ok ) {
     SPDLOG_ERROR("field/new failed: status {}, body {}", response.status, response.body);
     return std::nullopt;
@@ -58,10 +58,10 @@ bombs_result_t client_api_t::field_bombs (client_id_t id) {
   return result;
 }
 
-reveal_result_t client_api_t::action_reveal (client_id_t id, int x, int y) {
+reveal_result_t client_api_t::cell_reveal (client_id_t id, int x, int y) {
   reveal_result_t result;
   const http_response_t response =
-      http_.post("/action/reveal", {{"id", std::to_string(id)}, {"x", std::to_string(x)}, {"y", std::to_string(y)}});
+      http_.post("/cell/reveal", {{"id", std::to_string(id)}, {"x", std::to_string(x)}, {"y", std::to_string(y)}});
 
   const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
   if ( !response.ok ) {
@@ -90,10 +90,10 @@ reveal_result_t client_api_t::action_reveal (client_id_t id, int x, int y) {
   return result;
 }
 
-flag_result_t client_api_t::action_flag (client_id_t id, int x, int y) {
+flag_result_t client_api_t::cell_flag (client_id_t id, int x, int y) {
   flag_result_t result;
   const http_response_t response =
-      http_.post("/action/flag", {{"id", std::to_string(id)}, {"x", std::to_string(x)}, {"y", std::to_string(y)}});
+      http_.post("/cell/flag", {{"id", std::to_string(id)}, {"x", std::to_string(x)}, {"y", std::to_string(y)}});
 
   const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
   if ( !response.ok ) {
@@ -125,9 +125,9 @@ std::optional<bool> client_api_t::field_fully_revealed (client_id_t id) {
   return json.at("fully_revealed").get<bool>( );
 }
 
-check_result_t client_api_t::action_check (client_id_t id) {
+check_result_t client_api_t::field_check (client_id_t id) {
   check_result_t result;
-  const http_response_t response = http_.post("/action/check", {{"id", std::to_string(id)}});
+  const http_response_t response = http_.post("/field/check", {{"id", std::to_string(id)}});
 
   const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
   if ( !response.ok ) {

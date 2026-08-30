@@ -1,4 +1,6 @@
 #include <fmt/format.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <atomic>
 #include <CLI/CLI.hpp>
@@ -11,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <restbed>
 #include <string>
 #include <unordered_map>
 
@@ -25,6 +28,66 @@ struct resource_t {
 };
 
 addon_api_t api { };
+
+class rb_log : public restbed::Logger {
+  std::shared_ptr<spdlog::sinks::sink> console;
+  std::shared_ptr<spdlog::sinks::sink> file;
+  std::shared_ptr<spdlog::logger>      logger;
+
+  [[nodiscard]] constexpr spdlog::level::level_enum convert_level (restbed::Logger::Level level) noexcept {
+    switch ( level ) {
+      case restbed::Logger::Level::INFO:     return spdlog::level::info;
+      case restbed::Logger::Level::DEBUG:    return spdlog::level::debug;
+      case restbed::Logger::Level::FATAL:    return spdlog::level::critical;
+      case restbed::Logger::Level::ERROR:    return spdlog::level::err;
+      case restbed::Logger::Level::WARNING:  return spdlog::level::warn;
+      case restbed::Logger::Level::SECURITY: return spdlog::level::critical;
+      default:                               return spdlog::level::info;
+    }
+  }
+
+public:
+  void start (const std::shared_ptr<const restbed::Settings>&) override {
+    console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>( );
+    console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [restbed] %v");
+    console->set_level(spdlog::level::debug);
+
+    file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("restbed.log", true);
+    file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [restbed] %v");
+    file->set_level(spdlog::level::trace);
+
+    logger = std::make_shared<spdlog::logger>("restbed", spdlog::sinks_init_list {console, file});
+    logger->set_level(spdlog::level::debug);
+
+    logger->info("Restbed logger started");
+  }
+
+  void stop ( ) override {
+    logger->info("Restbed logger stopped");
+    spdlog::drop("restbed");
+  }
+
+  void log (const Level level, const char* format, ...) override {
+    va_list args;
+    va_start(args, format);
+    char message[1024];
+    vsprintf(message, format, args);
+    va_end(args);
+
+    logger->log(convert_level(level), "{}", message);
+  }
+
+  void log_if (bool expr, const Level level, const char* format, ...) override {
+    if ( !expr )
+      return;
+
+    va_list args;
+    va_start(args, format);
+    log(level, format, args);
+    va_end(args);
+
+  }
+};
 
 int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
@@ -42,17 +105,18 @@ int main (int argc, const char* argv[]) {
   }
 
   const std::vector<resource_t> resources {
-      {.path = "/field/new",            .method = http_methods_t::POST, .handler = field_new_handler           },
-      {.path = "/field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
-      {.path = "/field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
-      {.path = "/field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
-      {.path = "/action/reveal",        .method = http_methods_t::POST, .handler = action_reveal_handler       },
-      {.path = "/action/flag",          .method = http_methods_t::POST, .handler = action_flag_handler         },
-      {.path = "/action/check",         .method = http_methods_t::POST, .handler = action_check_handler        },
+      {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
+      {.path = "field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
+      {.path = "field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
+      {.path = "field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
+      {.path = "field/check",          .method = http_methods_t::POST, .handler = field_check_handler         },
+      {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
+      {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
   };
 
   const auto settings = std::make_shared<restbed::Settings>( );
   settings->set_port(port);
+  settings->set_worker_limit(4);
 
   restbed::Service service;
   for ( const auto& [path, method, handler]: resources ) {
@@ -61,9 +125,15 @@ int main (int argc, const char* argv[]) {
     resource->set_method_handler(to_string<const char*>(method), handler);
     service.publish(resource);
   }
+  service.set_logger(std::make_shared<rb_log>( ));
 
   SPDLOG_INFO("Listening on port {}", port);
-  service.start(settings);
+  try {
+    service.start(settings);
+  } catch ( std::system_error& e ) {
+    SPDLOG_ERROR("Failed to start server: {}", e.what( ));
+    return EXIT_FAILURE;
+  }
 
   SPDLOG_DEBUG("Finished minesweeper server");
   return EXIT_SUCCESS;

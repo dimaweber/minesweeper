@@ -29,7 +29,7 @@ int main (int argc, const char* argv[]) {
 
   const std::optional<field_id_t> field_id = field_id_opt->count( ) > 0 ? std::optional<field_id_t> {field_id_value} : std::nullopt;
 
-  const std::optional<client_id_t> client_id = api.field_new(field_id);
+  const std::optional<client_id_t> client_id = api.session_new(field_id);
   if ( !client_id ) {
     std::cerr << "Failed to create a new client on " << host << ":" << port << std::endl;
     return EXIT_FAILURE;

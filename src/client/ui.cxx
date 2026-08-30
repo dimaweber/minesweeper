@@ -215,7 +215,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
     if ( !fully || !*fully )
       return;
 
-    const check_result_t check = api.action_check(id);
+    const check_result_t check = api.field_check(id);
     if ( !check.ok )
       return;
 
@@ -252,7 +252,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
       case KEY_ENTER:
         {
           message.clear( );
-          const reveal_result_t result = api.action_reveal(id, cursor_x, cursor_y);
+          const reveal_result_t result = api.cell_reveal(id, cursor_x, cursor_y);
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else if ( result.boom ) {
@@ -275,7 +275,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
       case ' ':
         {
           message.clear( );
-          const flag_result_t result = api.action_flag(id, cursor_x, cursor_y);
+          const flag_result_t result = api.cell_flag(id, cursor_x, cursor_y);
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else {
