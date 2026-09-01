@@ -29,21 +29,23 @@ int main (int argc, const char* argv[]) {
 
   const std::optional<field_id_t> field_id = field_id_opt->count( ) > 0 ? std::optional<field_id_t> {field_id_value} : std::nullopt;
 
-  const std::optional<client_id_t> client_id = api.session_new(field_id);
-  if ( !client_id ) {
+  const std::optional<client_api_t::token_t> jwt_token = api.session_new(field_id);
+  if ( !jwt_token ) {
     std::cerr << "Failed to create a new client on " << host << ":" << port << std::endl;
     return EXIT_FAILURE;
   }
 
-  const auto size = api.field_size(*client_id);
+  api.set_jwt_token(*jwt_token);
+
+  const auto size = api.field_size();
   if ( !size ) {
     std::cerr << "Failed to fetch field size" << std::endl;
     return EXIT_FAILURE;
   }
 
-  const bombs_result_t bombs = api.field_bombs(*client_id);
+  const bombs_result_t bombs = api.field_bombs();
 
-  run_game(api, *client_id, size->first, size->second, bombs.ok ? bombs.total : 0);
+  run_game(api,  size->first, size->second, bombs.ok ? bombs.total : 0);
 
   return EXIT_SUCCESS;
 }

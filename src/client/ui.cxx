@@ -173,7 +173,7 @@ namespace {
 
 }// namespace
 
-void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t height, int bombs_total) {
+void run_game (client_api_t& api, std::size_t width, std::size_t height, int bombs_total) {
   std::setlocale(LC_ALL, "");
   initscr( );
   cbreak( );
@@ -201,7 +201,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
   bool     game_over  = false;
   std::string message;
 
-  const bombs_result_t bombs = api.field_bombs(id);
+  const bombs_result_t bombs = api.field_bombs();
   if ( bombs.ok ) {
     bombs_left  = bombs.left;
     bombs_total = bombs.total;
@@ -211,11 +211,11 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
   // revealed and, if so, runs the win/lose check and shows the result as a popup
   // window on top of the board.
   const auto check_game_end = [&] ( ) {
-    const std::optional<bool> fully = api.field_fully_revealed(id);
+    const std::optional<bool> fully = api.field_fully_revealed();
     if ( !fully || !*fully )
       return;
 
-    const check_result_t check = api.field_check(id);
+    const check_result_t check = api.field_check();
     if ( !check.ok )
       return;
 
@@ -252,7 +252,7 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
       case KEY_ENTER:
         {
           message.clear( );
-          const reveal_result_t result = api.cell_reveal(id, cursor_x, cursor_y);
+          const reveal_result_t result = api.cell_reveal( cursor_x, cursor_y);
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else if ( result.boom ) {
@@ -275,12 +275,12 @@ void run_game (client_api_t& api, client_id_t id, std::size_t width, std::size_t
       case ' ':
         {
           message.clear( );
-          const flag_result_t result = api.cell_flag(id, cursor_x, cursor_y);
+          const flag_result_t result = api.cell_flag( cursor_x, cursor_y);
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else {
             board.at(cursor_x, cursor_y).state = result.flagged ? cell_state_t::flagged : cell_state_t::hidden;
-            const bombs_result_t refreshed = api.field_bombs(id);
+            const bombs_result_t refreshed = api.field_bombs();
             if ( refreshed.ok ) {
               bombs_left  = refreshed.left;
               bombs_total = refreshed.total;

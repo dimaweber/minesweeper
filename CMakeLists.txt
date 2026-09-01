@@ -32,6 +32,7 @@ find_package(PalSigslot)
 find_dependency(nlohmann_json)
 cmake_pkg_config(IMPORT asio REQUIRED PC_PATH $ENV{HOME}/.local/lib/pkgconfig)
 cmake_pkg_config(IMPORT restbed REQUIRED PC_PATH $ENV{HOME}/.local/lib/pkgconfig)
+find_package(jwt-cpp REQUIRED)
 
 #find_program(CLANG_TIDY_EXE NAMES clang-tidy)
 if (CLANG_TIDY_EXE)
@@ -142,6 +143,14 @@ else ()
     add_compile_definitions(USE_RESTBED=0)
 endif ()
 
+if (jwt-cpp_FOUND)
+    message(STATUS "jwt-cpp library found: ${jwt-cpp_VERSION}")
+    add_compile_definitions(USE_JWT_CPP=1)
+else ()
+    message(WARNING "jwt-cpp library not found. Some features may be disabled.")
+    add_compile_definitions(USE_JWT_CPP=0)
+endif ()
+
 add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -g")
@@ -178,6 +187,7 @@ set(SOURCES_COMMON
 set(SOURCES_SERVER
         src/server/server.cxx
         src/server/handlers.cxx
+        src/server/rsa.cxx
 )
 
 set(SOURCES_CLIENT
@@ -199,7 +209,7 @@ add_library(${TARGET_COMMON} STATIC ${SOURCES_COMMON})
 target_link_libraries(${TARGET_COMMON} PUBLIC fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11)
 
 add_executable(${TARGET_SERVER} ${SOURCES_SERVER})
-target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
+target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON} OpenSSL::Crypto)
 if (tinyxml2_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE tinyxml2::tinyxml2)
 endif ()

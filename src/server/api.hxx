@@ -16,6 +16,7 @@
 #include <string>
 #include <wbr/string_manipulations.hxx>
 
+#include "rsa.hxx"
 #include "types.hxx"
 
 // 0-8 -- numer of neighbour mines
@@ -141,8 +142,8 @@ struct field_t {
     field_t::mark_revealed(data_[coord_to_index(x, y)]);
   }
 
-  std::vector<std::pair<int, int>> neighbors(int x, int y) const {
-    std::vector<std::pair<int, int>> result;
+  std::vector<std::pair<int, int>> neighbors (int x, int y) const {
+    std::vector<std::pair<int, int>>                 result;
     const std::initializer_list<std::pair<int, int>> neighbors = {
         {x - 1, y - 1},
         {x,     y - 1},
@@ -167,15 +168,14 @@ struct field_t {
   }
 
   int neighbor_bombs_count (int x, int y) const {
-    if (x<1 || x>static_cast<int>(w_) || y<1 || y>static_cast<int>(h_)) {
+    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) ) {
       return -1;
     }
-    if (is_boom(x, y)) {
+    if ( is_boom(x, y) ) {
       return -1;
     }
     return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return this->is_boom(p); });
   }
-
 
   [[nodiscard]] int bombs_total ( ) const {
     return std::ranges::count_if(data_, [] (u_short cell) { return field_t::is_boom(cell); });
@@ -234,6 +234,14 @@ struct addon_api_t {
   clients_t                clients;
   field_map_t              fields;
   std::atomic<client_id_t> next_client_id {1};
+  std::string              rsa_private_key;
+  std::string              rsa_public_key;
+  std::filesystem::path    rsa_priv_key_path = "minesweeper_rsa.pem";
+  std::filesystem::path    rsa_pub_key_path  = "minesweeper_rsa.pub";
+
+  addon_api_t ( ) {
+    std::tie(rsa_private_key, rsa_public_key) = rsa_key_pair(rsa_priv_key_path, rsa_pub_key_path);
+  }
 
   std::optional<client_id_t> add_new_client (field_id_t field_id) {
     const client_id_t id = next_client_id.fetch_add(1);

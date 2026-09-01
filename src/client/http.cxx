@@ -32,40 +32,91 @@ std::string http_client_t::build_url (const std::string& path, const http_params
 }
 
 namespace {
-  size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* body = static_cast<std::string*>(userdata);
-    body->append(ptr, size * nmemb);
-    return size * nmemb;
+size_t write_callback (char* ptr, size_t size, size_t nmemb, void* userdata) {
+  auto* body = static_cast<std::string*>(userdata);
+  body->append(ptr, size * nmemb);
+  return size * nmemb;
+}
+}  // namespace
+
+struct curl_slist_t {
+  curl_slist* list {nullptr};
+
+  curl_slist_t ( ) {
   }
-}// namespace
+
+  ~curl_slist_t ( ) {
+    if ( list )
+      curl_slist_free_all(list);
+  }
+
+  void append (const char* header) {
+    list = curl_slist_append(list, header);
+  }
+
+  operator curl_slist*( ) {
+    return list;
+  }
+};
+
+struct curl_ease_t {
+  CURL* curl {nullptr};
+
+  curl_ease_t ( ) noexcept {
+    curl = curl_easy_init( );
+  }
+
+  ~curl_ease_t ( ) {
+    if ( curl )
+      curl_easy_cleanup(curl);
+  }
+
+  [[nodiscard]] operator bool ( ) const noexcept{
+    return curl != nullptr;
+  }
+
+  auto setopt (CURLoption option, const auto value) noexcept {
+    return curl_easy_setopt(curl, option, value);
+  }
+
+  auto perform ( ) const noexcept {
+    return curl_easy_perform(curl);
+  }
+
+  auto getinfo (CURLINFO info, auto* value) noexcept {
+    return curl_easy_getinfo(curl, info, value);
+  }
+
+};
 
 http_response_t http_client_t::perform (const std::string& url, bool is_post) const {
   http_response_t response;
 
-  CURL* curl = curl_easy_init( );
+  curl_ease_t curl;
   if ( !curl ) {
     SPDLOG_ERROR("Failed to initialize curl handle");
     return response;
   }
 
-  curl_easy_setopt(curl, CURLOPT_URL, url.c_str( ));
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response.body);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+  curl.setopt(CURLOPT_URL, url.c_str( ));
+  curl.setopt(CURLOPT_WRITEFUNCTION, write_callback);
+  curl.setopt(CURLOPT_WRITEDATA, &response.body);
+  curl.setopt(CURLOPT_TIMEOUT, 5L);
   if ( is_post ) {
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
+    curl.setopt( CURLOPT_POST, 1L);
+    curl.setopt( CURLOPT_POSTFIELDSIZE, 0L);
   }
+  curl_slist_t headers;
+  headers.append(fmt::format("Authorization: Bearer {}", jwt_token_).c_str(  ));
+  curl.setopt( CURLOPT_HTTPHEADER, (curl_slist*)headers);
 
-  const CURLcode res = curl_easy_perform(curl);
+  const CURLcode res = curl.perform( );
   if ( res != CURLE_OK ) {
     SPDLOG_ERROR("HTTP request to {} failed: {}", url, curl_easy_strerror(res));
-    curl_easy_cleanup(curl);
     return response;
   }
 
-  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response.status);
-  curl_easy_cleanup(curl);
+  curl.getinfo(CURLINFO_RESPONSE_CODE, &response.status);
 
   response.ok = response.status >= 200 && response.status < 300;
   return response;

@@ -27,7 +27,7 @@ struct resource_t {
   const std::function<void(SessionPtr)> handler;
 };
 
-addon_api_t api { };
+std::shared_ptr<addon_api_t> api;
 
 class rb_log : public restbed::Logger {
   std::shared_ptr<spdlog::sinks::sink> console;
@@ -100,8 +100,10 @@ int main (int argc, const char* argv[]) {
 
   CLI11_PARSE(app, argc, argv);
 
+  api = std::make_shared<addon_api_t>( );
+
   for ( int i = 0; i < 10; ++i ) {
-    api.fields.emplace(i, field_t {10, 10});
+    api->fields.emplace(i, field_t {10, 10});
   }
 
   const std::vector<resource_t> resources {

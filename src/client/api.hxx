@@ -43,15 +43,21 @@ struct check_result_t {
 
 class client_api_t {
 public:
+  using token_t = std::string;
+
   client_api_t(std::string host, uint16_t port);
 
-  [[nodiscard]] std::optional<client_id_t>                         session_new(std::optional<field_id_t> field_id = std::nullopt);
-  [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> field_size(client_id_t id);
-  [[nodiscard]] bombs_result_t                                     field_bombs(client_id_t id);
-  [[nodiscard]] std::optional<bool>                                field_fully_revealed(client_id_t id);
-  [[nodiscard]] check_result_t                                     field_check(client_id_t id);
-  [[nodiscard]] reveal_result_t                                    cell_reveal(client_id_t id, int x, int y);
-  [[nodiscard]] flag_result_t                                      cell_flag(client_id_t id, int x, int y);
+  [[nodiscard]] std::optional<token_t>                             session_new(std::optional<field_id_t> field_id = std::nullopt) const;
+  [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> field_size( ) const;
+  [[nodiscard]] bombs_result_t                                     field_bombs( ) const;
+  [[nodiscard]] std::optional<bool>                                field_fully_revealed( ) const;
+  [[nodiscard]] check_result_t                                     field_check( ) const;
+  [[nodiscard]] reveal_result_t                                    cell_reveal(int x, int y) const;
+  [[nodiscard]] flag_result_t                                      cell_flag(int x, int y) const;
+
+  void set_jwt_token (const token_t& token) {
+    http_.set_jwt_token(token);
+  }
 
 private:
   http_client_t http_;
