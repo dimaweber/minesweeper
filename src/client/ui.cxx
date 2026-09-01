@@ -20,14 +20,14 @@ namespace {
   constexpr int COLOR_PAIR_WIN       = 7;
   constexpr int COLOR_PAIR_LOSE      = 8;
 
-  char symbol_for (const cell_t& cell) {
+  std::string symbol_for (const cell_t& cell) {
     switch ( cell.state ) {
-      case cell_state_t::hidden:   return ' ';
-      case cell_state_t::flagged:  return 'F';
-      case cell_state_t::boom:     return '*';
-      case cell_state_t::revealed: return cell.count == 0 ? ' ' : static_cast<char>('0' + cell.count);
+      case cell_state_t::hidden:   return "·";
+      case cell_state_t::flagged:  return "⚑";
+      case cell_state_t::boom:     return "💣";
+      case cell_state_t::revealed: return cell.count == 0 ? " " : std::string(1, static_cast<char>('0' + cell.count));
     }
-    return '?';
+    return "?";
   }
 
   int color_for (const cell_t& cell) {
@@ -119,7 +119,7 @@ namespace {
         attron(COLOR_PAIR(color_for(cell)));
         if ( bold )
           attron(A_BOLD);
-        mvaddch(base_row + CELL_HEIGHT / 2, base_col + CELL_WIDTH / 2, symbol_for(cell));
+        mvaddstr(base_row + CELL_HEIGHT / 2, base_col + CELL_WIDTH / 2, symbol_for(cell).c_str(  ));
         if ( bold )
           attroff(A_BOLD);
         attroff(COLOR_PAIR(color_for(cell)));
