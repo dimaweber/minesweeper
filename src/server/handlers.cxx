@@ -13,76 +13,13 @@ extern std::shared_ptr<addon_api_t> api;
 using namespace std::chrono_literals;
 
 const std::string issuer {"minesweeper"};
-const char*       client_id_claims = {"client_id"};
-
-void session_new_handler (SessionPtr session) {
-  const auto        request      = session->get_request( );
-  const std::string format_str   = request->get_query_parameter("format", "json");
-  const std::string field_id_str = request->get_query_parameter("field_id", "");
-
-  const content_type_t content_type = to_content_type(format_str);
-  field_id_t           field_id {0};
-
-  response_t r(session);
-
-  if ( !field_id_str.empty( ) ) {
-    std::errc ec;
-    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
-    if ( ec != std::errc { } ) {
-      return r.send_error(400, content_type, "invalid field_id parameter");
-    }
-  } else {
-    field_id = rand( ) % api->fields.size( );
-  }
-
-  const std::optional<client_id_t> id = api->add_new_client(field_id);
-  if ( !id ) {
-    return r.send_error(500, content_type, "failed to create new client");
-  }
-
-  SPDLOG_DEBUG("Created new client with id {}", *id);
-
-  const auto& pkey    = api->rsa_private_key;
-  const auto& pub_key = api->rsa_public_key;
-
-  try {
-    const auto token = jwt::create( )
-                           .set_issuer(issuer)
-                           .set_type("JWT")
-                           .set_id("minesweeper_server")
-                           .set_issued_at(std::chrono::system_clock::now( ))
-                           .set_expires_in(24h)
-                           .set_payload_claim("client_id", jwt::claim(std::to_string(*id)))
-                           .sign(jwt::algorithm::rs256(pub_key, pkey, "", ""));
-
-    SPDLOG_DEBUG("Generated JWT token for client {}: {}", *id, token);
-    r.add_field("token", token);
-
-    auto verify = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(pub_key, pkey, "", "")).with_issuer(issuer);
-
-    auto decoded = jwt::decode(token);
-
-    verify.verify(decoded);
-
-    const auto e = decoded.get_payload_claim(client_id_claims);
-    SPDLOG_DEBUG("JWT payload claim: {} = {}", client_id_claims, e.to_json( ).to_str( ));
-
-    SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, token);
-  } catch ( const jwt::error::token_verification_exception& e ) {
-    SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
-    return r.send_error(500, content_type, "failed to verify JWT token");
-  } catch ( const std::exception& e ) {
-    SPDLOG_ERROR("JWT generation failed: {}", e.what( ));
-    return r.send_error(500, content_type, "failed to generate JWT token");
-  }
-
-  return r.send(200, content_type);
-}
+const char*       client_id_claim = {"client_id"};
 
 template<typename T>
 using result_t = std::expected<T, std::string>;
 
-result_t<int> get_id_from_jwt (SessionPtr session) {
+namespace {
+result_t<std::string> get_jwt_from_request (SessionPtr session) {
   const auto        request       = session->get_request( );
   const std::string jwt_token_str = request->get_header("Authorization", "");
 
@@ -95,9 +32,12 @@ result_t<int> get_id_from_jwt (SessionPtr session) {
     return std::unexpected("invalid Authorization header");
   }
 
-  const std::string token {jwt_token->second};
-  auto              verify  = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(api->rsa_public_key, api->rsa_private_key, "", "")).with_issuer(issuer);
-  auto              decoded = jwt::decode(token);
+  return std::string {jwt_token->second};
+}
+
+result_t<int> get_id_from_jwt (const std::string& token) {
+  auto verify  = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(api->rsa_public_key, api->rsa_private_key, "", "")).with_issuer(issuer);
+  auto decoded = jwt::decode(token);
 
   try {
     verify.verify(decoded);
@@ -109,7 +49,7 @@ result_t<int> get_id_from_jwt (SessionPtr session) {
     return std::unexpected("invalid JWT token");
   }
 
-  const auto client_id_str = decoded.get_payload_claim(client_id_claims).to_json( ).to_str( );
+  const auto client_id_str = decoded.get_payload_claim(client_id_claim).to_json( ).to_str( );
 
   std::errc ec;
   const int id = wbr::str::num<int, wbr::str::num_match_t::full>(client_id_str, ec);
@@ -120,6 +60,83 @@ result_t<int> get_id_from_jwt (SessionPtr session) {
   return id;
 }
 
+result_t<client_id_t> authorize_client (SessionPtr session) {
+  const auto jwt_token = get_jwt_from_request(session);
+  if ( !jwt_token ) {
+    return std::unexpected(jwt_token.error( ));
+  }
+
+  const auto id = get_id_from_jwt(*jwt_token);
+  if ( !id ) {
+    return std::unexpected(id.error( ));
+  }
+
+  return *id;
+}
+
+result_t<std::string> create_jwt_for_client (client_id_t client_id) {
+  try {
+    const auto token = jwt::create( )
+                           .set_issuer(issuer)
+                           .set_type("JWT")
+                           .set_id("minesweeper_server")
+                           .set_issued_at(std::chrono::system_clock::now( ))
+                           .set_expires_in(24h)
+                           .set_payload_claim(client_id_claim, jwt::claim(std::to_string(client_id)))
+                           .sign(jwt::algorithm::rs256(api->rsa_public_key, api->rsa_private_key, "", ""));
+
+    SPDLOG_DEBUG("Generated JWT token for client {}: {}", client_id, token);
+    return token;
+  } catch ( const std::exception& e ) {
+    SPDLOG_ERROR("JWT generation failed: {}", e.what( ));
+    return std::unexpected("failed to generate JWT token");
+  }
+}
+}  // namespace
+
+void session_new_handler (SessionPtr session) {
+  const auto        request      = session->get_request( );
+  const std::string format_str   = request->get_query_parameter("format", "json");
+  const std::string field_id_str = request->get_query_parameter("field_id", "");
+
+  const content_type_t content_type = to_content_type(format_str);
+  field_id_t           field_id {0};
+
+  response_t r(session);
+
+  if ( field_id_str.empty( ) ) {
+    field_id = rand( ) % api->fields.size( );
+  } else {
+    std::errc ec;
+    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
+    if ( ec != std::errc { } ) {
+      return r.send_error(400, content_type, "invalid field_id parameter");
+    }
+  }
+
+  const std::optional<client_id_t> id = api->add_new_client(field_id);
+  if ( !id ) {
+    return r.send_error(500, content_type, "failed to create new client");
+  }
+
+  SPDLOG_DEBUG("Created new client with id {}", *id);
+
+  const auto token = create_jwt_for_client(*id);
+  if ( !token ) {
+    return r.send_error(500, content_type, token.error( ));
+  }
+  /* next verification is not required, just to make sure we understand lib api correctly */
+  const auto ver_id = get_id_from_jwt(*token);
+  if ( !ver_id ) {
+    return r.send_error(500, content_type, "failed to verify JWT token");
+  }
+  SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, *token);
+  /* end of verification */
+
+  r.add_field("token", *token);
+  return r.send(200, content_type);
+}
+
 void field_size_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
@@ -128,14 +145,14 @@ void field_size_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
-  field_t* field = api->field_for_client(*id);
+  const field_t* field = api->field_for_client(*id);
   if ( !field ) {
-    return r.send_error(400, content_type, "client not found");
+    return r.send_error(403, content_type, "client not found");
   }
 
   SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, field->w_, field->h_);
@@ -152,14 +169,14 @@ void field_bombs_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
-  field_t* field = api->field_for_client(*id);
+  const field_t* field = api->field_for_client(*id);
   if ( !field ) {
-    return r.send_error(400, content_type, "client not found");
+    return r.send_error(403, content_type, "client not found");
   }
 
   SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", *id, field->bombs_count( ), field->bombs_total( ));
@@ -176,14 +193,14 @@ void field_fully_revealed_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
-  field_t* field = api->field_for_client(*id);
+  const field_t* field = api->field_for_client(*id);
   if ( !field ) {
-    return r.send_error(400, content_type, "client not found");
+    return r.send_error(403, content_type, "client not found");
   }
 
   SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, field->unrevealed_count( ));
@@ -243,18 +260,16 @@ void cell_reveal_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
-  field_t* ptr = api->field_for_client(*id);
+  field_t* field = api->field_for_client(*id);
 
-  if ( ptr == nullptr ) {
-    return r.send_error(404, content_type, "client not found");
+  if ( field == nullptr ) {
+    return r.send_error(403, content_type, "client not found");
   }
-
-  field_t& field = *ptr;
 
   if ( x_str.empty( ) || y_str.empty( ) ) {
     return r.send_error(400, content_type, "missing mandatory parameter x or y");
@@ -272,13 +287,13 @@ void cell_reveal_handler (SessionPtr session) {
   }
 
   try {
-    if ( field.is_flag(x, y) ) {
+    if ( field->is_flag(x, y) ) {
       return r.send_error(400, content_type, "can't reveal flagged cell");
     }
-    if ( field.is_revealed(x, y) ) {
+    if ( field->is_revealed(x, y) ) {
       r.add_field("info", "already revealed");
     }
-    if ( field.is_boom(x, y) ) {
+    if ( field->is_boom(x, y) ) {
       // boom -- still returned as a (single-element) cells array, for API uniformity.
       parameter_map_t cell;
       cell.emplace("x", x);
@@ -292,7 +307,7 @@ void cell_reveal_handler (SessionPtr session) {
     // can never open a mine. This is implemented here at the handler level (rather
     // than inside field_t) so field_t keeps a single simple reveal() primitive, and
     // a future "plain" (non-auto) reveal endpoint could reuse it unchanged.
-    const std::vector<reveal_result_t> revealed = reveal_cells(field, x, y);
+    const std::vector<reveal_result_t> revealed = reveal_cells(*field, x, y);
 
     // Always return an array of cells, even when only one cell got revealed --
     // this keeps the response shape uniform (and simplifies both server and
@@ -332,22 +347,20 @@ void cell_flag_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
   if ( x_str.empty( ) || y_str.empty( ) ) {
     return r.send_error(400, content_type, "missing mandatory parameter x or y");
   }
 
-  field_t* ptr = api->field_for_client(*id);
+  field_t* field = api->field_for_client(*id);
 
-  if ( ptr == nullptr ) {
-    return r.send_error(404, content_type, "client not found");
+  if ( field == nullptr ) {
+    return r.send_error(403, content_type, "client not found");
   }
-
-  field_t& field = *ptr;
 
   std::errc  ec;
   const auto x = wbr::str::num<int, wbr::str::num_match_t::full>(x_str, ec);
@@ -360,16 +373,16 @@ void cell_flag_handler (SessionPtr session) {
     return r.send_error(400, content_type, "invalid parameter y");
   }
 
-  if ( field.is_revealed(x, y) ) {
+  if ( field->is_revealed(x, y) ) {
     return r.send_error(400, content_type, "can't flag revealed cell");
   }
 
-  if ( !field.is_flag(x, y) && field.bombs_count( ) == 0 ) {
+  if ( !field->is_flag(x, y) && field->bombs_count( ) == 0 ) {
     return r.send_error(400, content_type, "can't flag cell when no bombs left");
   }
 
-  field.toggle_flag(x, y);
-  r.add_field("status", "ok").add_field("x", x).add_field("y", y).add_field("flagged", field.is_flag(x, y));
+  field->toggle_flag(x, y);
+  r.add_field("status", "ok").add_field("x", x).add_field("y", y).add_field("flagged", field->is_flag(x, y));
   return r.send(200, content_type);
 }
 
@@ -381,29 +394,27 @@ void field_check_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = get_id_from_jwt(session);
+  const auto id = authorize_client(session);
   if ( !id ) {
-    return r.send_error(400, content_type, id.error( ));
+    return r.send_error(401, content_type, id.error( ));
   }
 
-  field_t* ptr = api->field_for_client(*id);
+  field_t* field = api->field_for_client(*id);
 
-  if ( ptr == nullptr ) {
-    return r.send_error(404, content_type, "client not found");
+  if ( field == nullptr ) {
+    return r.send_error(403, content_type, "client not found");
   }
-
-  field_t& field = *ptr;
 
   // Mines are never revealed by normal play (only flagged) -- the only way a mine
   // gets its "revealed" bit set is via a boom. So "fully revealed" (matching
   // field_fully_revealed_handler's own definition) means exactly bombs_total()
   // cells remain unrevealed, not zero.
-  if ( field.unrevealed_count( ) != field.bombs_total( ) ) {
+  if ( field->unrevealed_count( ) != field->bombs_total( ) ) {
     return r.send_error(400, content_type, "can't check field when unrevealed cells are left");
   }
   // A cell is "bad" (loses the game) if it's a mine that either wasn't flagged
   // or got revealed (boomed). A win means none of the mines are bad.
-  const bool ok = std::ranges::none_of(field.data_, [] (u_short cell) { return field_t::is_boom(cell) && (!field_t::is_flag(cell) || field_t::is_revealed(cell)); });
+  const bool ok = std::ranges::none_of(field->data_, [] (u_short cell) { return field_t::is_boom(cell) && (!field_t::is_flag(cell) || field_t::is_revealed(cell)); });
   if ( ok )
     r.add_field("status", "win");
   else
