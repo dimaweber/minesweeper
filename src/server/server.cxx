@@ -99,6 +99,8 @@ int main (int argc, const char* argv[]) {
   uint16_t                  ssl_port        = 8443;
   spdlog::level::level_enum log_level       = spdlog::level::debug;
   bool                      create_ssl_cert = false;
+  bool                      no_http {false};
+  bool                      no_https {false};
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
@@ -108,6 +110,12 @@ int main (int argc, const char* argv[]) {
   [[maybe_unused]] auto ssl_cert_opt        = app.add_option("--ssl-cert", api->ssl_cert_path, "Path to SSL certificate")->default_val(api->ssl_cert_path);
   [[maybe_unused]] auto ssl_dh_opt          = app.add_option("--ssl-dh", api->ssl_dh_path, "Path to SSL Diffie-Hellman parameters")->default_val(api->ssl_dh_path);
   [[maybe_unused]] auto create_ssl_cert_opt = app.add_flag("--create-ssl-cert", create_ssl_cert, "Create SSL certificate if it does not exist")->default_val(false);
+  [[maybe_unused]] auto no_http_opt         = app.add_flag("--no-http", no_http, "Disable HTTP connections")->default_val(false);
+  [[maybe_unused]] auto no_https_opt        = app.add_flag("--no-https", no_https, "Disable HTTPS connections")->default_val(false);
+
+  no_http_opt->excludes(no_https_opt);
+  no_https_opt->excludes(no_http_opt);
+  no_https_opt->excludes(create_ssl_cert_opt)->excludes(ssl_cert_opt)->excludes(ssl_dh_opt);
 
   ssl_cert_opt->excludes(create_ssl_cert_opt);
   ssl_dh_opt->excludes(create_ssl_cert_opt);
@@ -147,13 +155,15 @@ int main (int argc, const char* argv[]) {
   settings->set_port(port);
   settings->set_worker_limit(4);
 
-  const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
-  ssl_settings->set_http_disabled(false);
-  ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path)});
-  ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path)});
-  ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path)});
-  ssl_settings->set_port(ssl_port);
-  settings->set_ssl_settings(ssl_settings);
+  if ( !no_https_opt ) {
+    const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
+    ssl_settings->set_http_disabled(no_http);
+    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path)});
+    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path)});
+    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path)});
+    ssl_settings->set_port(ssl_port);
+    settings->set_ssl_settings(ssl_settings);
+  }
 
   restbed::Service service;
   for ( const auto& [path, method, handler]: resources ) {
