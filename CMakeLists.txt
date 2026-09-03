@@ -11,6 +11,7 @@ set(TARGET_CLIENT "ms_client")
 set(TARGET_SOLVER "ms_solver")
 set(TARGET_GENERATOR "ms_generator")
 set(TARGET_COMMON "ms_lib")
+set(TARGET_PLUGIN "ms_plugin_fields_list")
 
 list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local")
 
@@ -164,6 +165,8 @@ elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_definitions(NDEBUG=1)
 endif ()
 
+option(SERVER_SUPPORT_PLUGINS "Enable support for plugins" ON)
+
 add_compile_definitions(
         PROJECT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         PROJECT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
@@ -172,6 +175,11 @@ add_compile_definitions(
         $<$<CONFIG:Release>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>
 )
 include_directories(${CMAKE_SOURCE_DIR}/)
+if (SERVER_SUPPORT_PLUGINS)
+    add_compile_definitions(SERVER_SUPPORT_PLUGINS=1)
+else ()
+    add_compile_definitions(SERVER_SUPPORT_PLUGINS=0)
+endif ()
 
 find_program(CCACHE_PROGRAM ccache)
 if (CCACHE_PROGRAM)
@@ -188,6 +196,7 @@ set(SOURCES_SERVER
         src/server/server.cxx
         src/server/handlers.cxx
         src/server/rsa.cxx
+        src/server/api.cxx
 )
 
 set(SOURCES_CLIENT
@@ -210,6 +219,9 @@ target_link_libraries(${TARGET_COMMON} PUBLIC fmt::fmt spdlog::spdlog yaml-cpp::
 
 add_executable(${TARGET_SERVER} ${SOURCES_SERVER})
 target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON} OpenSSL::Crypto)
+if (SERVER_SUPPORT_PLUGINS)
+    target_link_libraries(${TARGET_SERVER} PRIVATE dl)
+endif ()
 if (tinyxml2_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE tinyxml2::tinyxml2)
 endif ()
@@ -219,6 +231,7 @@ endif ()
 if (PKGCONFIG_restbed_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE PkgConfig::restbed)
 endif ()
+set_target_properties(${TARGET_SERVER} PROPERTIES ENABLE_EXPORTS TRUE)
 
 if (CURSES_FOUND AND CURL_FOUND)
     add_executable(${TARGET_CLIENT} ${SOURCES_CLIENT})
@@ -232,3 +245,9 @@ target_link_libraries(${TARGET_SOLVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp:
 
 add_executable(${TARGET_GENERATOR} ${SOURCES_GENERATOR})
 target_link_libraries(${TARGET_GENERATOR} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
+
+add_library(${TARGET_PLUGIN} SHARED src/server_plugins/fields_list.cxx)
+target_link_libraries(${TARGET_PLUGIN} PRIVATE -lfmt)
+if (PKGCONFIG_restbed_FOUND)
+    target_link_libraries(${TARGET_PLUGIN} PRIVATE PkgConfig::restbed)
+endif ()

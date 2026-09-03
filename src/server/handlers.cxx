@@ -8,6 +8,7 @@
 #include <expected>
 #include <set>
 #include <wbr/string_manipulations.hxx>
+#include <inc/logger.hxx>
 
 extern std::shared_ptr<addon_api_t> api;
 

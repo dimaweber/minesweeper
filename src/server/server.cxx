@@ -1,3 +1,6 @@
+#if SERVER_SUPPORT_PLUGINS
+  #include <dlfcn.h>
+#endif
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -87,11 +90,51 @@ public:
   }
 };
 
+#if SERVER_SUPPORT_PLUGINS
+bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_t> api) {
+  SPDLOG_INFO("Loading plugins from {}", plugins_dir);
+  for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
+    if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
+      SPDLOG_INFO("Loading plugin {}", entry.path( ));
+      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_GLOBAL);
+      if ( !handle ) {
+        SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
+        continue;
+      }
+      using init_func_t     = void (*)(std::shared_ptr<addon_api_t>);
+      init_func_t init_func = reinterpret_cast<init_func_t>(::dlsym(handle, "init_plugin"));
+      if ( !init_func ) {
+        SPDLOG_ERROR("Failed to find init_plugin in {}: {}", entry.path( ), ::dlerror( ));
+        ::dlclose(handle);
+        continue;
+      }
+      init_func(api);
+      SPDLOG_INFO("Plugin {} loaded successfully", entry.path( ));
+    }
+  }
+  return true;
+}
+#endif
+std::vector<resource_t> resources {
+    {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
+    {.path = "field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
+    {.path = "field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
+    {.path = "field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
+    {.path = "field/check",          .method = http_methods_t::POST, .handler = field_check_handler         },
+    {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
+    {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
+};
+
+void add_resource (std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) {
+  resources.emplace_back(std::string(path), method, handler);
+}
+
 int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
 
   SPDLOG_DEBUG("Starting minesweeper server");
-  api = std::make_shared<addon_api_t>( );
+  api               = std::make_shared<addon_api_t>( );
+  api->add_resource = add_resource;
 
   CLI::App app("Server for minesweeper");
 
@@ -99,8 +142,9 @@ int main (int argc, const char* argv[]) {
   uint16_t                  ssl_port        = 8443;
   spdlog::level::level_enum log_level       = spdlog::level::debug;
   bool                      create_ssl_cert = false;
-  bool                      no_http {false};
-  bool                      no_https {false};
+  bool                      no_http         = false;
+  bool                      no_https        = false;
+  std::filesystem::path     plugins_dir { };
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
@@ -112,6 +156,7 @@ int main (int argc, const char* argv[]) {
   [[maybe_unused]] auto create_ssl_cert_opt = app.add_flag("--create-ssl-cert", create_ssl_cert, "Create SSL certificate if it does not exist")->default_val(false);
   [[maybe_unused]] auto no_http_opt         = app.add_flag("--no-http", no_http, "Disable HTTP connections")->default_val(false);
   [[maybe_unused]] auto no_https_opt        = app.add_flag("--no-https", no_https, "Disable HTTPS connections")->default_val(false);
+  [[maybe_unused]] auto plugins_dir_opt     = app.add_option("--plugins-dir", plugins_dir, "Directory to load plugins from")->check(CLI::ExistingDirectory);
 
   no_http_opt->excludes(no_https_opt);
   no_https_opt->excludes(no_http_opt);
@@ -124,6 +169,21 @@ int main (int argc, const char* argv[]) {
   CLI11_PARSE(app, argc, argv);
 
   spdlog::set_level(log_level);
+
+#if SERVER_SUPPORT_PLUGINS
+  SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
+  if ( !plugins_dir.empty( ) ) {
+    SPDLOG_INFO("Found plugins directory {}", plugins_dir);
+    if ( !load_plugins(plugins_dir, api) ) {
+      SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
+      return EXIT_FAILURE;
+    }
+  } else {
+    SPDLOG_INFO("No plugins directory specified, skipping plugin loading");
+  }
+#else
+  SPDLOG_INFO("Plugin support is disabled, skipping plugin loading");
+#endif
 
   if ( create_ssl_cert ) {
     if ( !std::filesystem::exists(api->ssl_cert_path) || !std::filesystem::exists(api->ssl_dh_path) ) {
@@ -141,21 +201,12 @@ int main (int argc, const char* argv[]) {
     api->fields.emplace(i, field_t {10, 10});
   }
 
-  const std::vector<resource_t> resources {
-      {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
-      {.path = "field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
-      {.path = "field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
-      {.path = "field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
-      {.path = "field/check",          .method = http_methods_t::POST, .handler = field_check_handler         },
-      {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
-      {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
-  };
-
   const auto settings = std::make_shared<restbed::Settings>( );
   settings->set_port(port);
   settings->set_worker_limit(4);
+  settings->set_default_header("Connection", "close");
 
-  if ( !no_https_opt ) {
+  if ( !no_https ) {
     const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
     ssl_settings->set_http_disabled(no_http);
     ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path)});
@@ -166,15 +217,25 @@ int main (int argc, const char* argv[]) {
   }
 
   restbed::Service service;
+  service.set_logger(std::make_shared<rb_log>( ));
+
+#if USE_PALSIGSLOT
+  api->ready_to_load_resources( );
+#endif
+
   for ( const auto& [path, method, handler]: resources ) {
     const auto resource = std::make_shared<restbed::Resource>( );
     resource->set_path(path);
     resource->set_method_handler(to_string<const char*>(method), handler);
     service.publish(resource);
   }
-  service.set_logger(std::make_shared<rb_log>( ));
 
-  SPDLOG_INFO("Listening on port {}", port);
+  if ( !no_http ) {
+    SPDLOG_INFO("Listening on port {} for HTTP", port);
+  }
+  if ( !no_https ) {
+    SPDLOG_INFO("Listening on port {} for HTTPS", ssl_port);
+  }
   try {
     service.start(settings);
   } catch ( std::system_error& e ) {
