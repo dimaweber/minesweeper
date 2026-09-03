@@ -3,7 +3,7 @@
 #include <inc/logger.hxx>
 #include <nlohmann/json.hpp>
 
-client_api_t::client_api_t (std::string host, uint16_t port) : http_ {std::move(host), port} {
+client_api_t::client_api_t (std::string host, uint16_t port, bool secure) : http_ {std::move(host), port, secure} {
 }
 
 std::optional<client_api_t::token_t> client_api_t::session_new (std::optional<field_id_t> field_id) const {

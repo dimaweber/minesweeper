@@ -42,8 +42,20 @@ struct field_t {
     }
   }
 
+  [[nodiscard]] bool valid_x (int x) const noexcept {
+    return x > 0 && x <= static_cast<int>(w_);
+  }
+
+  [[nodiscard]] bool valid_y (int y) const noexcept {
+    return y > 0 && y <= static_cast<int>(h_);
+  }
+
+  [[nodiscard]] bool valid_coords (int x, int y) const noexcept {
+    return valid_x(x) && valid_y(y);
+  }
+
   [[nodiscard]] constexpr size_t coord_to_index (int x, int y) const {
-    if ( x > 0 && x <= static_cast<int>(w_) && y > 0 && y <= static_cast<int>(h_) )
+    if ( valid_coords(x, y) )
       return (y - 1) * w_ + (x - 1);
     throw std::out_of_range(fmt::format("Coordinates ({},{}) are out of range for field size {}x{}", x, y, w_, h_));
   }
@@ -85,7 +97,7 @@ struct field_t {
   }
 
   [[nodiscard]] bool is_boom (int x, int y) const {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
+    if ( !valid_coords(x, y) )
       return false;
     return field_t::is_boom(data_[coord_to_index(x, y)]);
   }
@@ -99,7 +111,7 @@ struct field_t {
   }
 
   [[nodiscard]] bool is_flag (int x, int y) const {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
+    if ( !valid_coords(x, y) )
       return false;
     return field_t::is_flag(data_[coord_to_index(x, y)]);
   }
@@ -113,7 +125,7 @@ struct field_t {
   }
 
   [[nodiscard]] bool is_revealed (int x, int y) const {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
+    if ( !valid_coords(x, y) )
       return false;
     return field_t::is_revealed(data_[coord_to_index(x, y)]);
   }
@@ -127,7 +139,7 @@ struct field_t {
   }
 
   void toggle_flag (int x, int y) {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
+    if ( !valid_coords(x, y) )
       return;
     field_t::toggle_flag(data_[coord_to_index(x, y)]);
   }
@@ -137,7 +149,7 @@ struct field_t {
   }
 
   void mark_revealed (int x, int y) {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) )
+    if ( !valid_coords(x, y) )
       return;
     field_t::mark_revealed(data_[coord_to_index(x, y)]);
   }
@@ -155,7 +167,7 @@ struct field_t {
         {x + 1, y + 1}
     };
     for ( const auto& p: neighbors ) {
-      if ( p.first >= 1 && p.first <= static_cast<int>(w_) && p.second >= 1 && p.second <= static_cast<int>(h_) ) {
+      if ( valid_coords(p.first, p.second) ) {
         result.push_back(p);
       }
     }
@@ -168,7 +180,7 @@ struct field_t {
   }
 
   int neighbor_bombs_count (int x, int y) const {
-    if ( x < 1 || x > static_cast<int>(w_) || y < 1 || y > static_cast<int>(h_) ) {
+    if ( !valid_coords(x, y) ) {
       return -1;
     }
     if ( is_boom(x, y) ) {
@@ -236,8 +248,11 @@ struct addon_api_t {
   std::atomic<client_id_t> next_client_id {1};
   std::string              rsa_private_key;
   std::string              rsa_public_key;
+
   std::filesystem::path    rsa_priv_key_path = "minesweeper_rsa.pem";
   std::filesystem::path    rsa_pub_key_path  = "minesweeper_rsa.pub";
+  std::filesystem::path    ssl_cert_path     = "minesweeper.crt";
+  std::filesystem::path    ssl_dh_path       = "minesweeper_dh.pem";
 
   addon_api_t ( ) {
     std::tie(rsa_private_key, rsa_public_key) = rsa_key_pair(rsa_priv_key_path, rsa_pub_key_path);

@@ -45,7 +45,7 @@ class client_api_t {
 public:
   using token_t = std::string;
 
-  client_api_t(std::string host, uint16_t port);
+  client_api_t(std::string host, uint16_t port, bool secure);
 
   [[nodiscard]] std::optional<token_t>                             session_new(std::optional<field_id_t> field_id = std::nullopt) const;
   [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> field_size( ) const;
@@ -57,6 +57,10 @@ public:
 
   void set_jwt_token (const token_t& token) {
     http_.set_jwt_token(token);
+  }
+
+  void set_trust_certs (bool trust) noexcept {
+    http_.set_trust_certs(trust);
   }
 
 private:

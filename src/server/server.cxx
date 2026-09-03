@@ -1,17 +1,15 @@
 #include <fmt/format.h>
+#include <fmt/std.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#include <atomic>
 #include <CLI/CLI.hpp>
 #include <corvusoft/restbed/request.hpp>
 #include <corvusoft/restbed/resource.hpp>
 #include <corvusoft/restbed/service.hpp>
-#include <corvusoft/restbed/session.hpp>
 #include <corvusoft/restbed/settings.hpp>
 #include <cstdlib>
 #include <memory>
-#include <mutex>
 #include <nlohmann/json.hpp>
 #include <restbed>
 #include <string>
@@ -20,6 +18,7 @@
 #include "api.hxx"
 #include "handlers.hxx"
 #include "inc/logger.hxx"
+#include "rsa.hxx"
 
 struct resource_t {
   const std::string                     path;
@@ -85,7 +84,6 @@ public:
     va_start(args, format);
     log(level, format, args);
     va_end(args);
-
   }
 };
 
@@ -93,14 +91,43 @@ int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
 
   SPDLOG_DEBUG("Starting minesweeper server");
+  api = std::make_shared<addon_api_t>( );
+
   CLI::App app("Server for minesweeper");
 
-  uint16_t port = 8080;
+  uint16_t                  port            = 8080;
+  uint16_t                  ssl_port        = 8443;
+  spdlog::level::level_enum log_level       = spdlog::level::debug;
+  bool                      create_ssl_cert = false;
+
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
+  app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
+  app.add_option("-l,--log-level", log_level, "Log level")->transform(CLI::CheckedTransformer(spdlog_level_conversion_table, CLI::ignore_case));
+  app.add_option("--rsa-priv-key", api->rsa_priv_key_path, "Path to RSA private key")->default_val(api->rsa_priv_key_path);
+  app.add_option("--rsa-pub-key", api->rsa_pub_key_path, "Path to RSA public key")->default_val(api->rsa_pub_key_path);
+  [[maybe_unused]] auto ssl_cert_opt        = app.add_option("--ssl-cert", api->ssl_cert_path, "Path to SSL certificate")->default_val(api->ssl_cert_path);
+  [[maybe_unused]] auto ssl_dh_opt          = app.add_option("--ssl-dh", api->ssl_dh_path, "Path to SSL Diffie-Hellman parameters")->default_val(api->ssl_dh_path);
+  [[maybe_unused]] auto create_ssl_cert_opt = app.add_flag("--create-ssl-cert", create_ssl_cert, "Create SSL certificate if it does not exist")->default_val(false);
+
+  ssl_cert_opt->excludes(create_ssl_cert_opt);
+  ssl_dh_opt->excludes(create_ssl_cert_opt);
+  create_ssl_cert_opt->excludes(ssl_cert_opt)->excludes(ssl_dh_opt);
 
   CLI11_PARSE(app, argc, argv);
 
-  api = std::make_shared<addon_api_t>( );
+  spdlog::set_level(log_level);
+
+  if ( create_ssl_cert ) {
+    if ( !std::filesystem::exists(api->ssl_cert_path) || !std::filesystem::exists(api->ssl_dh_path) ) {
+      SPDLOG_INFO("Creating self-signed SSL certificate and Diffie-Hellman parameters");
+      if ( !create_self_signed_ssl_cert(api->ssl_cert_path, api->ssl_dh_path, api->rsa_priv_key_path) ) {
+        SPDLOG_ERROR("Failed to create self-signed SSL certificate and Diffie-Hellman parameters");
+        return EXIT_FAILURE;
+      }
+    } else {
+      SPDLOG_INFO("SSL certificate and Diffie-Hellman parameters already exist, skipping creation");
+    }
+  }
 
   for ( int i = 0; i < 10; ++i ) {
     api->fields.emplace(i, field_t {10, 10});
@@ -119,6 +146,14 @@ int main (int argc, const char* argv[]) {
   const auto settings = std::make_shared<restbed::Settings>( );
   settings->set_port(port);
   settings->set_worker_limit(4);
+
+  const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
+  ssl_settings->set_http_disabled(false);
+  ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path)});
+  ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path)});
+  ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path)});
+  ssl_settings->set_port(ssl_port);
+  settings->set_ssl_settings(ssl_settings);
 
   restbed::Service service;
   for ( const auto& [path, method, handler]: resources ) {

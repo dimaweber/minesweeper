@@ -1,6 +1,6 @@
-#include <cstdlib>
 #include <CLI/CLI.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -20,12 +20,19 @@ int main (int argc, const char* argv[]) {
   uint16_t port = 8080;
   app.add_option("-p,--port", port, "Server port")->default_val(8080);
 
-  uint64_t field_id_value = 0;
-  const auto* field_id_opt = app.add_option("-f,--field-id", field_id_value, "Id of an existing field to attach to");
+  uint64_t    field_id_value = 0;
+  const auto* field_id_opt   = app.add_option("-f,--field-id", field_id_value, "Id of an existing field to attach to");
+
+  bool        use_ssl        = false;
+  app.add_flag("-s,--ssl", use_ssl, "Use SSL/TLS");
+
+  bool trust_certs = false;
+  app.add_flag("-t,--trust-certs", trust_certs, "Trust all SSL/TLS certificates");
 
   CLI11_PARSE(app, argc, argv);
 
-  client_api_t api {host, port};
+  client_api_t api {host, port, use_ssl};
+  api.set_trust_certs(trust_certs);
 
   const std::optional<field_id_t> field_id = field_id_opt->count( ) > 0 ? std::optional<field_id_t> {field_id_value} : std::nullopt;
 
@@ -37,15 +44,15 @@ int main (int argc, const char* argv[]) {
 
   api.set_jwt_token(*jwt_token);
 
-  const auto size = api.field_size();
+  const auto size = api.field_size( );
   if ( !size ) {
     std::cerr << "Failed to fetch field size" << std::endl;
     return EXIT_FAILURE;
   }
 
-  const bombs_result_t bombs = api.field_bombs();
+  const bombs_result_t bombs = api.field_bombs( );
 
-  run_game(api,  size->first, size->second, bombs.ok ? bombs.total : 0);
+  run_game(api, size->first, size->second, bombs.ok ? bombs.total : 0);
 
   return EXIT_SUCCESS;
 }

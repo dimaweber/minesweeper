@@ -5,11 +5,16 @@
 
 #include <inc/logger.hxx>
 
-http_client_t::http_client_t (std::string host, uint16_t port) : host_ {std::move(host)}, port_ {port} {
+http_client_t::http_client_t (std::string host, uint16_t port, bool secure) : host_ {std::move(host)}, port_ {port}, secure_ {secure} {
+  curl_global_init(CURL_GLOBAL_ALL);
+}
+
+http_client_t::~http_client_t ( ) {
+  curl_global_cleanup( );
 }
 
 std::string http_client_t::build_url (const std::string& path, const http_params_t& params) const {
-  std::string url = fmt::format("http://{}:{}{}", host_, port_, path);
+  std::string url = secure_ ? fmt::format("https://{}:{}{}", host_, port_, path) : fmt::format("http://{}:{}{}", host_, port_, path);
   if ( params.empty( ) )
     return url;
 
@@ -62,6 +67,11 @@ struct curl_slist_t {
 struct curl_ease_t {
   CURL* curl {nullptr};
 
+  curl_ease_t(const curl_ease_t&)             = delete;
+  curl_ease_t& operator= (const curl_ease_t&) = delete;
+  curl_ease_t(curl_ease_t&&)                  = delete;
+  curl_ease_t& operator= (curl_ease_t&&)      = delete;
+
   curl_ease_t ( ) noexcept {
     curl = curl_easy_init( );
   }
@@ -71,7 +81,7 @@ struct curl_ease_t {
       curl_easy_cleanup(curl);
   }
 
-  [[nodiscard]] operator bool ( ) const noexcept{
+  [[nodiscard]] operator bool ( ) const noexcept {
     return curl != nullptr;
   }
 
@@ -87,6 +97,13 @@ struct curl_ease_t {
     return curl_easy_getinfo(curl, info, value);
   }
 
+  auto set_url (const std::string& url) noexcept {
+    return setopt(CURLOPT_URL, url.c_str( ));
+  }
+
+  auto set_timeout (long seconds) noexcept {
+    return setopt(CURLOPT_TIMEOUT, seconds);
+  }
 };
 
 http_response_t http_client_t::perform (const std::string& url, bool is_post) const {
@@ -98,17 +115,26 @@ http_response_t http_client_t::perform (const std::string& url, bool is_post) co
     return response;
   }
 
-  curl.setopt(CURLOPT_URL, url.c_str( ));
+  if ( secure_ ) {
+    if ( trust_certs_ ) {
+      curl.setopt(CURLOPT_SSL_VERIFYPEER, 0L);
+      curl.setopt(CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    curl.setopt(CURLOPT_CA_CACHE_TIMEOUT, 604800L);
+  }
+  curl.set_url(url);
   curl.setopt(CURLOPT_WRITEFUNCTION, write_callback);
   curl.setopt(CURLOPT_WRITEDATA, &response.body);
-  curl.setopt(CURLOPT_TIMEOUT, 5L);
+  curl.set_timeout(5L);
   if ( is_post ) {
-    curl.setopt( CURLOPT_POST, 1L);
-    curl.setopt( CURLOPT_POSTFIELDSIZE, 0L);
+    curl.setopt(CURLOPT_POST, 1L);
+    curl.setopt(CURLOPT_POSTFIELDSIZE, 0L);
   }
   curl_slist_t headers;
-  headers.append(fmt::format("Authorization: Bearer {}", jwt_token_).c_str(  ));
-  curl.setopt( CURLOPT_HTTPHEADER, (curl_slist*)headers);
+  if ( !jwt_token_.empty( ) ) {
+    headers.append(fmt::format("Authorization: Bearer {}", jwt_token_).c_str( ));
+    curl.setopt(CURLOPT_HTTPHEADER, (curl_slist*)headers);
+  }
 
   const CURLcode res = curl.perform( );
   if ( res != CURLE_OK ) {
