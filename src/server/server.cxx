@@ -90,13 +90,17 @@ public:
   }
 };
 
-#if SERVER_SUPPORT_PLUGINS
+std::vector<void*> plugin_handles;
+
 bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_t> api) {
+  if constexpr ( !SERVER_SUPPORT_PLUGINS )
+    return false;
+
   SPDLOG_INFO("Loading plugins from {}", plugins_dir);
   for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
     if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
       SPDLOG_INFO("Loading plugin {}", entry.path( ));
-      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_GLOBAL);
+      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL );
       if ( !handle ) {
         SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
         continue;
@@ -109,12 +113,30 @@ bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<add
         continue;
       }
       init_func(api);
+      plugin_handles.push_back(handle);
       SPDLOG_INFO("Plugin {} loaded successfully", entry.path( ));
     }
   }
   return true;
 }
-#endif
+
+void unload_plugins ( ) {
+  if constexpr ( !SERVER_SUPPORT_PLUGINS )
+    return;
+
+  SPDLOG_INFO("Unloading plugins");
+  for ( void* handle: plugin_handles ) {
+    if ( handle ) {
+      using unload_func_t       = void (*)( );
+      unload_func_t unload_func = reinterpret_cast<unload_func_t>(::dlsym(handle, "unload_plugin"));
+      if ( unload_func ) {
+        unload_func( );
+      }
+      ::dlclose(handle);
+    }
+  }
+}
+
 std::vector<resource_t> resources {
     {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
     {.path = "field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
@@ -127,6 +149,14 @@ std::vector<resource_t> resources {
 
 void add_resource (std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) {
   resources.emplace_back(std::string(path), method, handler);
+}
+
+[[nodiscard]]
+std::filesystem::path get_exe_directory ( ) noexcept {
+  char              r[PATH_MAX];
+  const ssize_t     count = ::readlink("/proc/self/exe", r, PATH_MAX);
+  const std::string path {r, (count > 0) ? static_cast<std::size_t>(count) : 0};
+  return std::filesystem::path(path).parent_path( );
 }
 
 int main (int argc, const char* argv[]) {
@@ -144,7 +174,7 @@ int main (int argc, const char* argv[]) {
   bool                      create_ssl_cert = false;
   bool                      no_http         = false;
   bool                      no_https        = false;
-  std::filesystem::path     plugins_dir { };
+  std::filesystem::path     plugins_dir {get_exe_directory( ) / "plugins"};
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
@@ -166,24 +196,28 @@ int main (int argc, const char* argv[]) {
   ssl_dh_opt->excludes(create_ssl_cert_opt);
   create_ssl_cert_opt->excludes(ssl_cert_opt)->excludes(ssl_dh_opt);
 
+  if constexpr ( !SERVER_SUPPORT_PLUGINS ) {
+    plugins_dir_opt->excludes(plugins_dir_opt);
+  }
+
   CLI11_PARSE(app, argc, argv);
 
   spdlog::set_level(log_level);
 
-#if SERVER_SUPPORT_PLUGINS
-  SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
-  if ( !plugins_dir.empty( ) ) {
-    SPDLOG_INFO("Found plugins directory {}", plugins_dir);
-    if ( !load_plugins(plugins_dir, api) ) {
-      SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
-      return EXIT_FAILURE;
+  if constexpr ( SERVER_SUPPORT_PLUGINS ) {
+    SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
+    if ( !plugins_dir.empty( ) ) {
+      SPDLOG_INFO("Found plugins directory {}", plugins_dir);
+      if ( !load_plugins(plugins_dir, api) ) {
+        SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
+        return EXIT_FAILURE;
+      }
+    } else {
+      SPDLOG_INFO("No plugins directory specified, skipping plugin loading");
     }
   } else {
-    SPDLOG_INFO("No plugins directory specified, skipping plugin loading");
+    SPDLOG_INFO("Plugin support is disabled, skipping plugin loading");
   }
-#else
-  SPDLOG_INFO("Plugin support is disabled, skipping plugin loading");
-#endif
 
   if ( create_ssl_cert ) {
     if ( !std::filesystem::exists(api->ssl_cert_path) || !std::filesystem::exists(api->ssl_dh_path) ) {
@@ -242,6 +276,8 @@ int main (int argc, const char* argv[]) {
     SPDLOG_ERROR("Failed to start server: {}", e.what( ));
     return EXIT_FAILURE;
   }
+
+  unload_plugins( );
 
   SPDLOG_DEBUG("Finished minesweeper server");
   return EXIT_SUCCESS;

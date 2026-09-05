@@ -11,7 +11,6 @@ set(TARGET_CLIENT "ms_client")
 set(TARGET_SOLVER "ms_solver")
 set(TARGET_GENERATOR "ms_generator")
 set(TARGET_COMMON "ms_lib")
-set(TARGET_PLUGIN "ms_plugin_fields_list")
 
 list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local")
 
@@ -220,7 +219,7 @@ target_link_libraries(${TARGET_COMMON} PUBLIC fmt::fmt spdlog::spdlog yaml-cpp::
 add_executable(${TARGET_SERVER} ${SOURCES_SERVER})
 target_link_libraries(${TARGET_SERVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON} OpenSSL::Crypto)
 if (SERVER_SUPPORT_PLUGINS)
-    target_link_libraries(${TARGET_SERVER} PRIVATE dl)
+    target_link_libraries(${TARGET_SERVER} PRIVATE -ldl)
 endif ()
 if (tinyxml2_FOUND)
     target_link_libraries(${TARGET_SERVER} PRIVATE tinyxml2::tinyxml2)
@@ -246,8 +245,6 @@ target_link_libraries(${TARGET_SOLVER} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp:
 add_executable(${TARGET_GENERATOR} ${SOURCES_GENERATOR})
 target_link_libraries(${TARGET_GENERATOR} PRIVATE fmt::fmt spdlog::spdlog yaml-cpp::yaml-cpp CLI11::CLI11 ${TARGET_COMMON})
 
-add_library(${TARGET_PLUGIN} SHARED src/server_plugins/fields_list.cxx)
-target_link_libraries(${TARGET_PLUGIN} PRIVATE -lfmt)
-if (PKGCONFIG_restbed_FOUND)
-    target_link_libraries(${TARGET_PLUGIN} PRIVATE PkgConfig::restbed)
+if (SERVER_SUPPORT_PLUGINS)
+    add_subdirectory(src/server/plugins)
 endif ()

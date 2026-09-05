@@ -91,6 +91,40 @@ reveal_result_t client_api_t::cell_reveal (int x, int y) const {
   return result;
 }
 
+reveal_result_t client_api_t::cell_check (int x, int y) const {
+  reveal_result_t       result;
+  const http_response_t response = http_.post("/cell/check", {
+                                                                 {"x", std::to_string(x)},
+                                                                 {"y", std::to_string(y)}
+  });
+
+  const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
+  if ( !response.ok ) {
+    result.error = (!json.is_discarded( ) && json.contains("error")) ? json.at("error").get<std::string>( ) : response.body;
+    return result;
+  }
+
+  if ( json.is_discarded( ) || !json.contains("status") ) {
+    result.error = "malformed response";
+    return result;
+  }
+
+  result.ok   = true;
+  result.boom = json.at("status").get<std::string>( ) == "boom";
+  if ( json.contains("cells") ) {
+    for ( const auto& c: json.at("cells") ) {
+      revealed_cell_t cell;
+      cell.x = c.at("x").get<int>( );
+      cell.y = c.at("y").get<int>( );
+      if ( !result.boom && c.contains("count") ) {
+        cell.count = c.at("count").get<int>( );
+      }
+      result.cells.push_back(cell);
+    }
+  }
+  return result;
+}
+
 flag_result_t client_api_t::cell_flag (int x, int y) const {
   flag_result_t         result;
   const http_response_t response = http_.post("/cell/flag", {

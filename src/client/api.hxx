@@ -54,6 +54,7 @@ public:
   [[nodiscard]] check_result_t                                     field_check( ) const;
   [[nodiscard]] reveal_result_t                                    cell_reveal(int x, int y) const;
   [[nodiscard]] flag_result_t                                      cell_flag(int x, int y) const;
+  [[nodiscard]] reveal_result_t                                    cell_check(int x, int y) const;
 
   void set_jwt_token (const token_t& token) {
     http_.set_jwt_token(token);

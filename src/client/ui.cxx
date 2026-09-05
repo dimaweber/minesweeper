@@ -272,6 +272,29 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
           }
           break;
         }
+      case KEY_BACKSPACE:
+      case KEY_BTAB: {
+        message.clear(  );
+        const reveal_result_t result = api.cell_check( cursor_x, cursor_y);
+        if ( !result.ok ) {
+          message = "error: " + result.error;
+        } else if ( result.boom ) {
+          for ( const auto& cell: result.cells ) {
+            board.at(cell.x, cell.y).state = cell_state_t::boom;
+          }
+          draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "");
+          draw_result_window("Boom! You lose. Press any key to exit.", COLOR_PAIR_LOSE);
+          getch( );
+          game_over = true;
+        } else {
+          for ( const auto& cell: result.cells ) {
+            board.at(cell.x, cell.y).state = cell_state_t::revealed;
+            board.at(cell.x, cell.y).count = cell.count;
+          }
+          check_game_end( );
+        }
+        break;
+      }
       case ' ':
         {
           message.clear( );

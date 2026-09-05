@@ -54,6 +54,10 @@ size_t field_t::coord_to_index (int x, int y) const {
   throw std::out_of_range(fmt::format("Coordinates ({},{}) are out of range for field size {}x{}", x, y, w_, h_));
 }
 
+size_t field_t::coord_to_index (coord_t coords) const {
+  return coord_to_index(coords.first, coords.second);
+}
+
 auto clients_t::add (client_id_t id, field_id_t field_id, field_t field) {
   const std::lock_guard lock {access_};
   return data_.emplace(id, client_context_t {.field_id_ = field_id, .field_ = field});
@@ -86,12 +90,24 @@ bool field_t::valid_coords (int x, int y) const noexcept {
   return valid_x(x) && valid_y(y);
 }
 
+bool field_t::valid_coords (coord_t coords) const noexcept {
+  return valid_coords(coords.first, coords.second);
+}
+
 u_short field_t::operator[] (int x, int y) const {
   return data_[coord_to_index(x, y)];
 }
 
 u_short& field_t::operator[] (int x, int y) {
   return data_[coord_to_index(x, y)];
+}
+
+u_short field_t::operator[] (coord_t coords) const {
+  return data_[coord_to_index(coords)];
+}
+
+u_short& field_t::operator[] (coord_t coords) {
+  return data_[coord_to_index(coords)];
 }
 
 auto field_t::begin ( ) {
@@ -128,7 +144,7 @@ bool field_t::is_boom (int x, int y) const {
   return field_t::is_boom(data_[coord_to_index(x, y)]);
 }
 
-bool field_t::is_boom (std::pair<int, int> coords) const {
+bool field_t::is_boom (coord_t coords) const {
   return is_boom(coords.first, coords.second);
 }
 
@@ -142,7 +158,7 @@ bool field_t::is_flag (int x, int y) const {
   return field_t::is_flag(data_[coord_to_index(x, y)]);
 }
 
-bool field_t::is_flag (std::pair<int, int> coords) const {
+bool field_t::is_flag (coord_t coords) const {
   return is_flag(coords.first, coords.second);
 }
 
@@ -156,7 +172,7 @@ bool field_t::is_revealed (int x, int y) const {
   return field_t::is_revealed(data_[coord_to_index(x, y)]);
 }
 
-bool field_t::is_revealed (std::pair<int, int> coords) const {
+bool field_t::is_revealed (coord_t coords) const {
   return is_revealed(coords.first, coords.second);
 }
 
@@ -170,6 +186,10 @@ void field_t::toggle_flag (int x, int y) {
   field_t::toggle_flag(data_[coord_to_index(x, y)]);
 }
 
+void field_t::toggle_flag (coord_t coords) {
+  toggle_flag(coords.first, coords.second);
+}
+
 void field_t::mark_revealed (ushort& cell) {
   cell |= 0x10;
 }
@@ -180,8 +200,12 @@ void field_t::mark_revealed (int x, int y) {
   field_t::mark_revealed(data_[coord_to_index(x, y)]);
 }
 
-std::vector<std::pair<int, int>> field_t::neighbors (int x, int y) const {
-  std::vector<std::pair<int, int>>                 result;
+void field_t::mark_revealed (coord_t coords) {
+  mark_revealed(coords.first, coords.second);
+}
+
+std::vector<coord_t> field_t::neighbors (int x, int y) const {
+  std::vector<coord_t>                 result;
   const std::initializer_list<std::pair<int, int>> neighbors = {
       {x - 1, y - 1},
       {x,     y - 1},
@@ -200,9 +224,17 @@ std::vector<std::pair<int, int>> field_t::neighbors (int x, int y) const {
   return result;
 }
 
+std::vector<coord_t> field_t::neighbors (coord_t coords) const {
+  return neighbors(coords.first, coords.second);
+}
+
 int field_t::reveal (int x, int y) {
   mark_revealed(x, y);
   return neighbor_bombs_count(x, y);
+}
+
+int field_t::reveal (coord_t coords) {
+  return reveal(coords.first, coords.second);
 }
 
 int field_t::neighbor_bombs_count (int x, int y) const {
@@ -213,6 +245,42 @@ int field_t::neighbor_bombs_count (int x, int y) const {
     return -1;
   }
   return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return this->is_boom(p); });
+}
+
+int field_t::neighbor_bombs_count (coord_t coords) const {
+  return neighbor_bombs_count(coords.first, coords.second);
+}
+
+int field_t::neighbor_flags_count (int x, int y) const {
+  if ( !valid_coords(x, y) ) {
+    return -1;
+  }
+  return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return this->is_flag(p); });
+}
+int field_t::neighbor_flags_count (coord_t coords) const {
+  return neighbor_flags_count(coords.first, coords.second);
+}
+
+int field_t::neighbor_revealed_count (int x, int y) const {
+  if ( !valid_coords(x, y) ) {
+    return -1;
+  }
+  return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return this->is_revealed(p); });
+}
+
+int field_t::neighbor_revealed_count (coord_t coords) const {
+  return neighbor_revealed_count(coords.first, coords.second);
+}
+
+int field_t::neighbor_unrevealed_count (int x, int y) const {
+  if ( !valid_coords(x, y) ) {
+    return -1;
+  }
+  return std::ranges::count_if(neighbors(x, y), [this] (const auto& p) { return !this->is_revealed(p); });
+}
+
+int field_t::neighbor_unrevealed_count (coord_t coords) const {
+  return neighbor_unrevealed_count(coords.first, coords.second);
 }
 
 int field_t::bombs_total ( ) const {

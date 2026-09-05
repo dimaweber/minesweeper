@@ -6,9 +6,9 @@
 #include <corvusoft/restbed/status_code.hpp>
 #include <deque>
 #include <expected>
+#include <inc/logger.hxx>
 #include <set>
 #include <wbr/string_manipulations.hxx>
-#include <inc/logger.hxx>
 
 extern std::shared_ptr<addon_api_t> api;
 
@@ -17,12 +17,9 @@ using namespace std::chrono_literals;
 const std::string issuer {"minesweeper"};
 const char*       client_id_claim = {"client_id"};
 
-template<typename T>
-using result_t = std::expected<T, std::string>;
-
-namespace {
+namespace handlers {
 result_t<std::string> get_jwt_from_request (SessionPtr session) {
-  const auto        request       = session->get_request( );
+  const auto        request   = session->get_request( );
   const std::string token_str = request->get_header("Authorization", "");
 
   if ( token_str.empty( ) || !token_str.starts_with("Bearer ") ) {
@@ -30,7 +27,7 @@ result_t<std::string> get_jwt_from_request (SessionPtr session) {
   }
 
   const auto token = wbr::str::splitAtFirst(token_str, " ");
-  if ( !token|| token->second.empty( ) ) {
+  if ( !token || token->second.empty( ) ) {
     return std::unexpected("invalid Authorization header");
   }
 
@@ -94,132 +91,13 @@ result_t<std::string> create_jwt_for_client (client_id_t client_id) {
     return std::unexpected("failed to generate JWT token");
   }
 }
-}  // namespace
 
-void session_new_handler (SessionPtr session) {
-  const auto        request      = session->get_request( );
-  const std::string format_str   = request->get_query_parameter("format", "json");
-  const std::string field_id_str = request->get_query_parameter("field_id", "");
-
-  const content_type_t content_type = to_content_type(format_str);
-  field_id_t           field_id {0};
-
-  response_t r(session);
-
-  if ( field_id_str.empty( ) ) {
-    field_id = rand( ) % api->fields.size( );
-  } else {
-    std::errc ec;
-    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
-    if ( ec != std::errc { } ) {
-      return r.send_error(restbed::BAD_REQUEST, content_type, "invalid field_id parameter");
-    }
-  }
-
-  const std::optional<client_id_t> id = api->add_new_client(field_id);
-  if ( !id ) {
-    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to create new client");
-  }
-
-  SPDLOG_DEBUG("Created new client with id {}", *id);
-
-  const auto token = create_jwt_for_client(*id);
-  if ( !token ) {
-    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, token.error( ));
-  }
-  /* next verification is not required, just to make sure we understand lib api correctly */
-  const auto ver_id = get_id_from_jwt(*token);
-  if ( !ver_id ) {
-    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to verify JWT token");
-  }
-  SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, *token);
-  /* end of verification */
-
-  r.add_field("token", *token);
-  return r.send(restbed::OK, content_type);
-}
-
-void field_size_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
-  const std::string format  = request->get_query_parameter("format", "json");
-
-  const content_type_t content_type = to_content_type(format);
-
-  response_t r {session};
-
-  const auto id = authorize_client(session);
-  if ( !id ) {
-    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
-  }
-
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
-    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
-  }
-
-  SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, field->w_, field->h_);
-
-  r.add_field("width", field->w_).add_field("height", field->h_);
-  return r.send(restbed::OK, content_type);
-}
-
-void field_bombs_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
-  const std::string format  = request->get_query_parameter("format", "json");
-
-  const content_type_t content_type = to_content_type(format);
-
-  response_t r {session};
-
-  const auto id = authorize_client(session);
-  if ( !id ) {
-    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
-  }
-
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
-    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
-  }
-
-  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", *id, field->bombs_count( ), field->bombs_total( ));
-
-  r.add_field("bombs", field->bombs_count( )).add_field("total", field->bombs_total( ));
-  return r.send(restbed::OK, content_type);
-}
-
-void field_fully_revealed_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
-  const std::string format  = request->get_query_parameter("format", "json");
-
-  const content_type_t content_type = to_content_type(format);
-
-  response_t r {session};
-
-  const auto id = authorize_client(session);
-  if ( !id ) {
-    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
-  }
-
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
-    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
-  }
-
-  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, field->unrevealed_count( ));
-
-  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ) && field->flags_count( ) == field->bombs_total( ));
-  return r.send(restbed::OK, content_type);
-}
-
-struct reveal_result_t {
-  int x, y, count;
-};
 
 std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y) {
   std::vector<reveal_result_t>  revealed;
   std::set<std::pair<int, int>> visited;
 
-  if ( field.is_flag(x, y) || field.is_revealed(x, y) || field.is_boom(x, y) ) {
+  if ( field.is_flag(x, y) || field.is_revealed(x, y) /*|| field.is_boom(x, y)*/ ) {
     return revealed;
   }
 
@@ -252,17 +130,134 @@ std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y) {
   return revealed;
 }
 
+}  // namespace handlers
+
+void session_new_handler (SessionPtr session) {
+  const auto        request      = session->get_request( );
+  const std::string format_str   = request->get_query_parameter("format", "json");
+  const std::string field_id_str = request->get_query_parameter("field_id", "");
+
+  const content_type_t content_type = to_content_type(format_str);
+  field_id_t           field_id {0};
+
+  response_t r(session);
+
+  if ( field_id_str.empty( ) ) {
+    field_id = rand( ) % api->fields.size( );
+  } else {
+    std::errc ec;
+    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
+    if ( ec != std::errc { } ) {
+      return r.send_error(restbed::BAD_REQUEST, content_type, "invalid field_id parameter");
+    }
+  }
+
+  const std::optional<client_id_t> id = api->add_new_client(field_id);
+  if ( !id ) {
+    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to create new client");
+  }
+
+  SPDLOG_DEBUG("Created new client with id {}", *id);
+
+  const auto token = handlers::create_jwt_for_client(*id);
+  if ( !token ) {
+    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, token.error( ));
+  }
+  /* next verification is not required, just to make sure we understand lib api correctly */
+  const auto ver_id = handlers::get_id_from_jwt(*token);
+  if ( !ver_id ) {
+    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to verify JWT token");
+  }
+  SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, *token);
+  /* end of verification */
+
+  r.add_field("token", *token);
+  return r.send(restbed::OK, content_type);
+}
+
+void field_size_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  const auto id = handlers::authorize_client(session);
+  if ( !id ) {
+    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
+  }
+
+  const field_t* field = api->field_for_client(*id);
+  if ( !field ) {
+    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, field->w_, field->h_);
+
+  r.add_field("width", field->w_).add_field("height", field->h_);
+  return r.send(restbed::OK, content_type);
+}
+
+void field_bombs_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  const auto id = handlers::authorize_client(session);
+  if ( !id ) {
+    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
+  }
+
+  const field_t* field = api->field_for_client(*id);
+  if ( !field ) {
+    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", *id, field->bombs_count( ), field->bombs_total( ));
+
+  r.add_field("bombs", field->bombs_count( )).add_field("total", field->bombs_total( ));
+  return r.send(restbed::OK, content_type);
+}
+
+void field_fully_revealed_handler (SessionPtr session) {
+  const auto        request = session->get_request( );
+  const std::string format  = request->get_query_parameter("format", "json");
+
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  const auto id = handlers::authorize_client(session);
+  if ( !id ) {
+    return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
+  }
+
+  const field_t* field = api->field_for_client(*id);
+  if ( !field ) {
+    return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
+  }
+
+  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, field->unrevealed_count( ));
+
+  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ) && field->flags_count( ) == field->bombs_total( ));
+  return r.send(restbed::OK, content_type);
+}
+
 void cell_reveal_handler (SessionPtr session) {
   const auto        request = session->get_request( );
-  const int x   = request->get_query_parameter<int>("x", -1);
-  const int y   = request->get_query_parameter<int>("y", -1);
+  const int         x       = request->get_query_parameter<int>("x", -1);
+  const int         y       = request->get_query_parameter<int>("y", -1);
   const std::string format  = request->get_query_parameter("format", "json");
 
   const auto content_type = to_content_type(format);
 
   response_t r {session};
 
-  const auto id = authorize_client(session);
+  const auto id = handlers::authorize_client(session);
   if ( !id ) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
@@ -276,7 +271,7 @@ void cell_reveal_handler (SessionPtr session) {
   if ( x <= 0 || y <= 0 ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "missing mandatory parameter x or y");
   }
-  if (!field->valid_coords(x, y) ) {
+  if ( !field->valid_coords(x, y) ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "coordinates out of range");
   }
 
@@ -301,7 +296,7 @@ void cell_reveal_handler (SessionPtr session) {
     // can never open a mine. This is implemented here at the handler level (rather
     // than inside field_t) so field_t keeps a single simple reveal() primitive, and
     // a future "plain" (non-auto) reveal endpoint could reuse it unchanged.
-    const std::vector<reveal_result_t> revealed = reveal_cells(*field, x, y);
+    const std::vector<handlers::reveal_result_t> revealed = handlers::reveal_cells(*field, x, y);
 
     // Always return an array of cells, even when only one cell got revealed --
     // this keeps the response shape uniform (and simplifies both server and
@@ -320,11 +315,7 @@ void cell_reveal_handler (SessionPtr session) {
       cell.emplace("bomb", rc < 0);
       cells.emplace_back(cell);
     }
-    if ( boomed ) {
-      r.add_field("status", "boom").add_field("cells", cells);
-      return r.send(restbed::OK, content_type);
-    }
-    r.add_field("status", "ok").add_field("cells", cells);
+    r.add_field("cells", cells).add_field("status", boomed ? "boom" : "ok");
     return r.send(restbed::OK, content_type);
   } catch ( std::out_of_range& e ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "coordinates out of range");
@@ -341,7 +332,7 @@ void cell_flag_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = authorize_client(session);
+  const auto id = handlers::authorize_client(session);
   if ( !id ) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
@@ -388,7 +379,7 @@ void field_check_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto id = authorize_client(session);
+  const auto id = handlers::authorize_client(session);
   if ( !id ) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
