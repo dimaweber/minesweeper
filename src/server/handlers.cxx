@@ -93,15 +93,15 @@ result_t<std::string> create_jwt_for_client (client_id_t client_id) {
 }
 
 
-std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y) {
+std::vector<reveal_result_t> reveal_cells (board_t& board, int x, int y) {
   std::vector<reveal_result_t>  revealed;
   std::set<std::pair<int, int>> visited;
 
-  if ( field.is_flag(x, y) || field.is_revealed(x, y) /*|| field.is_boom(x, y)*/ ) {
+  if ( board.is_flag(x, y) || board.is_revealed(x, y) /*|| board.is_boom(x, y)*/ ) {
     return revealed;
   }
 
-  const int count = field.reveal(x, y);
+  const int count = board.reveal(x, y);
   revealed.push_back({x, y, count});
   visited.emplace(x, y);
 
@@ -113,13 +113,13 @@ std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y) {
       const auto [cx, cy] = queue.front( );
       queue.pop_front( );
 
-      for ( const auto& [nx, ny]: field.neighbors(cx, cy) ) {
+      for ( const auto& [nx, ny]: board.neighbors(cx, cy) ) {
         if ( !visited.emplace(nx, ny).second )
           continue;
-        if ( field.is_flag(nx, ny) || field.is_revealed(nx, ny) )
+        if ( board.is_flag(nx, ny) || board.is_revealed(nx, ny) )
           continue;
 
-        const int n_count = field.reveal(nx, ny);
+        const int n_count = board.reveal(nx, ny);
         revealed.push_back({nx, ny, n_count});
         if ( n_count == 0 )
           queue.emplace_back(nx, ny);
@@ -135,24 +135,24 @@ std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y) {
 void session_new_handler (SessionPtr session) {
   const auto        request      = session->get_request( );
   const std::string format_str   = request->get_query_parameter("format", "json");
-  const std::string field_id_str = request->get_query_parameter("field_id", "");
+  const std::string board_id_str = request->get_query_parameter("board_id", "");
 
   const content_type_t content_type = to_content_type(format_str);
-  field_id_t           field_id {0};
+  board_id_t           board_id {0};
 
   response_t r(session);
 
-  if ( field_id_str.empty( ) ) {
-    field_id = rand( ) % api->fields.size( );
+  if ( board_id_str.empty( ) ) {
+    board_id = rand( ) % api->boards.size( );
   } else {
     std::errc ec;
-    field_id = wbr::str::num<field_id_t, wbr::str::num_match_t::full>(field_id_str, ec);
+    board_id = wbr::str::num<board_id_t, wbr::str::num_match_t::full>(board_id_str, ec);
     if ( ec != std::errc { } ) {
-      return r.send_error(restbed::BAD_REQUEST, content_type, "invalid field_id parameter");
+      return r.send_error(restbed::BAD_REQUEST, content_type, "invalid board_id parameter");
     }
   }
 
-  const std::optional<client_id_t> id = api->add_new_client(field_id);
+  const std::optional<client_id_t> id = api->add_new_client(board_id);
   if ( !id ) {
     return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to create new client");
   }
@@ -171,11 +171,11 @@ void session_new_handler (SessionPtr session) {
   SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, *token);
   /* end of verification */
 
-  r.add_field("token", *token);
+  r.add_property("token", *token);
   return r.send(restbed::OK, content_type);
 }
 
-void field_size_handler (SessionPtr session) {
+void board_size_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
@@ -188,18 +188,18 @@ void field_size_handler (SessionPtr session) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
+  const board_t* board = api->board_for_client(*id);
+  if ( !board ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
-  SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, field->w_, field->h_);
+  SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, board->w_, board->h_);
 
-  r.add_field("width", field->w_).add_field("height", field->h_);
+  r.add_property("width", board->w_).add_property("height", board->h_);
   return r.send(restbed::OK, content_type);
 }
 
-void field_bombs_handler (SessionPtr session) {
+void board_bombs_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
@@ -212,18 +212,18 @@ void field_bombs_handler (SessionPtr session) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
+  const board_t* board = api->board_for_client(*id);
+  if ( !board ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
-  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", *id, field->bombs_count( ), field->bombs_total( ));
+  SPDLOG_DEBUG("Bombs request for client {}: {}/{} bombs", *id, board->bombs_count( ), board->bombs_total( ));
 
-  r.add_field("bombs", field->bombs_count( )).add_field("total", field->bombs_total( ));
+  r.add_property("bombs", board->bombs_count( )).add_property("total", board->bombs_total( ));
   return r.send(restbed::OK, content_type);
 }
 
-void field_fully_revealed_handler (SessionPtr session) {
+void board_fully_revealed_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
@@ -236,14 +236,14 @@ void field_fully_revealed_handler (SessionPtr session) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const field_t* field = api->field_for_client(*id);
-  if ( !field ) {
+  const board_t* board = api->board_for_client(*id);
+  if ( !board ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
-  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, field->unrevealed_count( ));
+  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, board->unrevealed_count( ));
 
-  r.add_field("fully_revealed", field->unrevealed_count( ) == field->bombs_total( ) && field->flags_count( ) == field->bombs_total( ));
+  r.add_property("fully_revealed", board->unrevealed_count( ) == board->bombs_total( ) && board->flags_count( ) == board->bombs_total( ));
   return r.send(restbed::OK, content_type);
 }
 
@@ -262,41 +262,40 @@ void cell_reveal_handler (SessionPtr session) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  field_t* field = api->field_for_client(*id);
-
-  if ( field == nullptr ) {
+  board_t* board = api->board_for_client(*id);
+  if ( board == nullptr ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
   if ( x <= 0 || y <= 0 ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "missing mandatory parameter x or y");
   }
-  if ( !field->valid_coords(x, y) ) {
+  if ( !board->valid_coords(x, y) ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "coordinates out of range");
   }
 
   try {
-    if ( field->is_flag(x, y) ) {
+    if ( board->is_flag(x, y) ) {
       return r.send_error(restbed::BAD_REQUEST, content_type, "can't reveal flagged cell");
     }
-    if ( field->is_revealed(x, y) ) {
-      r.add_field("info", "already revealed");
+    if ( board->is_revealed(x, y) ) {
+      r.add_property("info", "already revealed");
     }
-    if ( field->is_boom(x, y) ) {
+    if ( board->is_boom(x, y) ) {
       // boom -- still returned as a (single-element) cells array, for API uniformity.
       parameter_map_t cell;
       cell.emplace("x", x);
       cell.emplace("y", y);
-      r.add_field("status", "boom").add_field("cells", parameter_list_t {cell});
+      r.add_property("status", "boom").add_property("cells", parameter_list_t {cell});
       return r.send(restbed::OK, content_type);
     }
 
     // Auto-reveal: opening a cell with 0 neighbouring mines recursively opens all
     // of its neighbours (and, transitively, their neighbours), but this flood-fill
     // can never open a mine. This is implemented here at the handler level (rather
-    // than inside field_t) so field_t keeps a single simple reveal() primitive, and
+    // than inside board_t) so board_t keeps a single simple reveal() primitive, and
     // a future "plain" (non-auto) reveal endpoint could reuse it unchanged.
-    const std::vector<handlers::reveal_result_t> revealed = handlers::reveal_cells(*field, x, y);
+    const std::vector<handlers::reveal_result_t> revealed = handlers::reveal_cells(*board, x, y);
 
     // Always return an array of cells, even when only one cell got revealed --
     // this keeps the response shape uniform (and simplifies both server and
@@ -315,7 +314,7 @@ void cell_reveal_handler (SessionPtr session) {
       cell.emplace("bomb", rc < 0);
       cells.emplace_back(cell);
     }
-    r.add_field("cells", cells).add_field("status", boomed ? "boom" : "ok");
+    r.add_property("cells", cells).add_property("status", boomed ? "boom" : "ok");
     return r.send(restbed::OK, content_type);
   } catch ( std::out_of_range& e ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "coordinates out of range");
@@ -341,9 +340,9 @@ void cell_flag_handler (SessionPtr session) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "missing mandatory parameter x or y");
   }
 
-  field_t* field = api->field_for_client(*id);
+  board_t* board = api->board_for_client(*id);
 
-  if ( field == nullptr ) {
+  if ( board == nullptr ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
@@ -358,20 +357,20 @@ void cell_flag_handler (SessionPtr session) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "invalid parameter y");
   }
 
-  if ( field->is_revealed(x, y) ) {
+  if ( board->is_revealed(x, y) ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "can't flag revealed cell");
   }
 
-  if ( !field->is_flag(x, y) && field->bombs_count( ) == 0 ) {
+  if ( !board->is_flag(x, y) && board->bombs_count( ) == 0 ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "can't flag cell when no bombs left");
   }
 
-  field->toggle_flag(x, y);
-  r.add_field("status", "ok").add_field("x", x).add_field("y", y).add_field("flagged", field->is_flag(x, y));
+  board->toggle_flag(x, y);
+  r.add_property("status", "ok").add_property("x", x).add_property("y", y).add_property("flagged", board->is_flag(x, y));
   return r.send(restbed::OK, content_type);
 }
 
-void field_check_handler (SessionPtr session) {
+void board_check_handler (SessionPtr session) {
   const auto        request = session->get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
@@ -384,25 +383,25 @@ void field_check_handler (SessionPtr session) {
     return r.send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  field_t* field = api->field_for_client(*id);
+  board_t* board = api->board_for_client(*id);
 
-  if ( field == nullptr ) {
+  if ( board == nullptr ) {
     return r.send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
 
   // Mines are never revealed by normal play (only flagged) -- the only way a mine
   // gets its "revealed" bit set is via a boom. So "fully revealed" (matching
-  // field_fully_revealed_handler's own definition) means exactly bombs_total()
+  // board_fully_revealed_handler's own definition) means exactly bombs_total()
   // cells remain unrevealed, not zero.
-  if ( field->unrevealed_count( ) != field->bombs_total( ) ) {
+  if ( board->unrevealed_count( ) != board->bombs_total( ) ) {
     return r.send_error(restbed::BAD_REQUEST, content_type, "can't check field when unrevealed cells are left");
   }
   // A cell is "bad" (loses the game) if it's a mine that either wasn't flagged
   // or got revealed (boomed). A win means none of the mines are bad.
-  const bool ok = std::ranges::none_of(field->data_, [] (u_short cell) { return field_t::is_boom(cell) && (!field_t::is_flag(cell) || field_t::is_revealed(cell)); });
+  const bool ok = std::ranges::none_of(board->data_, [] (u_short cell) { return board_t::is_boom(cell) && (!board_t::is_flag(cell) || board_t::is_revealed(cell)); });
   if ( ok )
-    r.add_field("status", "win");
+    r.add_property("status", "win");
   else
-    r.add_field("status", "lose");
+    r.add_property("status", "lose");
   return r.send(restbed::OK, content_type);
 }

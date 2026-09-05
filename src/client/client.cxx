@@ -34,7 +34,7 @@ int main (int argc, const char* argv[]) {
   client_api_t api {host, port, use_ssl};
   api.set_trust_certs(trust_certs);
 
-  const std::optional<field_id_t> field_id = field_id_opt->count( ) > 0 ? std::optional<field_id_t> {field_id_value} : std::nullopt;
+  const std::optional<board_id_t> field_id = field_id_opt->count( ) > 0 ? std::optional<board_id_t> {field_id_value} : std::nullopt;
 
   const std::optional<client_api_t::token_t> jwt_token = api.session_new(field_id);
   if ( !jwt_token ) {
@@ -44,13 +44,13 @@ int main (int argc, const char* argv[]) {
 
   api.set_jwt_token(*jwt_token);
 
-  const auto size = api.field_size( );
+  const auto size = api.board_size( );
   if ( !size ) {
-    std::cerr << "Failed to fetch field size" << std::endl;
+    std::cerr << "Failed to fetch board size" << std::endl;
     return EXIT_FAILURE;
   }
 
-  const bombs_result_t bombs = api.field_bombs( );
+  const bombs_result_t bombs = api.board_bombs( );
 
   run_game(api, size->first, size->second, bombs.ok ? bombs.total : 0);
 

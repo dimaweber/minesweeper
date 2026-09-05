@@ -23,12 +23,12 @@ using coord_t = std::pair<int, int>;
 //          0x01 -- revealed
 //          0x02 -- flagged
 //   0x1a -- failure -- game over
-struct field_t {
+struct board_t {
   std::vector<u_short> data_;
   std::size_t          w_;
   std::size_t          h_;
 
-  field_t(std::size_t width, std::size_t height);
+  board_t(std::size_t width, std::size_t height);
 
   [[nodiscard]] bool valid_x(int x) const noexcept;
   [[nodiscard]] bool valid_y(int y) const noexcept;
@@ -95,18 +95,18 @@ private:
   [[nodiscard]] size_t coord_to_index(coord_t coords) const;
 };
 
-using field_id_t  = uint64_t;
-using field_map_t = std::unordered_map<field_id_t, field_t>;
+using board_id_t  = uint64_t;
+using board_map_t = std::unordered_map<board_id_t, board_t>;
 
 struct client_context_t {
-  field_id_t field_id_;
-  field_t    field_;
+  board_id_t board_id_;
+  board_t    board_;
 };
 
 using client_id_t = uint64_t;
 
 struct clients_t {
-  auto add(client_id_t id, field_id_t field_id, field_t field);
+  auto add(client_id_t id, board_id_t field_id, board_t field);
   auto find(client_id_t id);
   auto end( );
   auto begin( );
@@ -122,7 +122,7 @@ using headers_t   = std::multimap<std::string, std::string>;
 
 struct addon_api_t {
   clients_t                clients;
-  field_map_t              fields;
+  board_map_t              boards;
   std::atomic<client_id_t> next_client_id {1};
   std::string              rsa_private_key;
   std::string              rsa_public_key;
@@ -149,8 +149,8 @@ struct addon_api_t {
 
   addon_api_t( );
 
-  std::optional<client_id_t> add_new_client(field_id_t field_id);
-  field_t*                   field_for_client(client_id_t client_id);
+  std::optional<client_id_t> add_new_client(board_id_t board_id);
+  board_t*                   board_for_client(client_id_t client_id);
 };
 
 // A parameter is either a scalar value, an array of parameters of the same
@@ -173,7 +173,7 @@ class response_t {
 public:
   explicit response_t(SessionPtr session);
 
-  response_t& add_field(const std::string& key, parameter_t value);
+  response_t& add_property(const std::string& key, parameter_t value);
 
   response_t& add_header(const std::string& key, const std::convertible_to<std::string> auto& value);
   response_t& add_header(const std::string& key, std::integral auto value);
@@ -189,7 +189,7 @@ public:
 
 private:
   SessionPtr      session_;
-  parameter_map_t fields_;
+  parameter_map_t parameters_;
   headers_t       headers_;
 
   std::string                       response_body(content_type_t content_type, const parameter_map_t& m);

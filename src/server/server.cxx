@@ -139,10 +139,10 @@ void unload_plugins ( ) {
 
 std::vector<resource_t> resources {
     {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
-    {.path = "field/size",           .method = http_methods_t::GET,  .handler = field_size_handler          },
-    {.path = "field/bombs",          .method = http_methods_t::GET,  .handler = field_bombs_handler         },
-    {.path = "field/fully_revealed", .method = http_methods_t::GET,  .handler = field_fully_revealed_handler},
-    {.path = "field/check",          .method = http_methods_t::POST, .handler = field_check_handler         },
+    {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler          },
+    {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler         },
+    {.path = "board/fully_revealed", .method = http_methods_t::GET,  .handler = board_fully_revealed_handler},
+    {.path = "board/check",          .method = http_methods_t::POST, .handler = board_check_handler         },
     {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
     {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
 };
@@ -232,7 +232,7 @@ int main (int argc, const char* argv[]) {
   }
 
   for ( int i = 0; i < 10; ++i ) {
-    api->fields.emplace(i, field_t {10, 10});
+    api->boards.emplace(i, board_t {10, 10});
   }
 
   const auto settings = std::make_shared<restbed::Settings>( );

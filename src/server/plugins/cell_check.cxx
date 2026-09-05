@@ -33,38 +33,38 @@ void cell_check_handler (SessionPtr session) {
 
   response_t r {session};
 
-  const auto field_id = handlers::authorize_client(session);
-  if ( !field_id ) {
-    api->log(addon_api_t::log_level_t::debug, "cell_check_handler: authorization failed: {}", field_id.error( ));
-    return r.send_error(restbed::UNAUTHORIZED, content_type_t::json, field_id.error( ));
+  const auto board_id = handlers::authorize_client(session);
+  if ( !board_id ) {
+    api->log(addon_api_t::log_level_t::debug, "cell_check_handler: authorization failed: {}", board_id.error( ));
+    return r.send_error(restbed::UNAUTHORIZED, content_type_t::json, board_id.error( ));
   }
-  api->log(addon_api_t::log_level_t::debug, "cell_check_handler: authorized client with field_id={}", *field_id);
+  api->log(addon_api_t::log_level_t::debug, "cell_check_handler: authorized client with board_id={}", *board_id);
 
-  field_t* field_ptr = api->field_for_client(*field_id);
-  if ( !field_ptr ) {
-    api->log(addon_api_t::log_level_t::debug, "cell_check_handler: client not found for field_id={}", *field_id);
+  board_t* board_ptr = api->board_for_client(*board_id);
+  if ( !board_ptr ) {
+    api->log(addon_api_t::log_level_t::debug, "cell_check_handler: client not found for board_id={}", *board_id);
     return r.send_error(restbed::FORBIDDEN, content_type_t::json, "Client not found");
   }
-  api->log(addon_api_t::log_level_t::debug, "cell_check_handler: found field for client with field_id={}", *field_id);
+  api->log(addon_api_t::log_level_t::debug, "cell_check_handler: found board for client with board_id={}", *board_id);
 
   if ( x == -1 || y == -1 ) {
     api->log(addon_api_t::log_level_t::debug, "cell_check_handler: missing required query parameters: x={}, y={}", x, y);
     return r.send_error(restbed::BAD_REQUEST, content_type_t::json, "Missing required query parameters: x, y");
   }
-  if ( !field_ptr->valid_coords(x, y) ) {
+  if ( !board_ptr->valid_coords(x, y) ) {
     api->log(addon_api_t::log_level_t::debug, "cell_check_handler: invalid coordinates: x={}, y={}", x, y);
     return r.send_error(restbed::BAD_REQUEST, content_type_t::json, "Invalid coordinates");
   }
-  if ( !field_ptr->is_revealed(x, y) ) {
+  if ( !board_ptr->is_revealed(x, y) ) {
     api->log(addon_api_t::log_level_t::debug, "cell_check_handler: cell is not revealed: x={}, y={}", x, y);
     return r.send_error(restbed::BAD_REQUEST, content_type_t::json, "Cell is not revealed");
   }
-  if ( field_ptr->is_boom(x, y) ) {
+  if ( board_ptr->is_boom(x, y) ) {
     api->log(addon_api_t::log_level_t::debug, "cell_check_handler: cell is a bomb: x={}, y={}", x, y);
     return r.send_error(restbed::BAD_REQUEST, content_type_t::json, "Cell is a bomb");
   }
-  const int flags_around = field_ptr->neighbor_flags_count(x, y);
-  const int bombs_around = field_ptr->neighbor_bombs_count(x, y);
+  const int flags_around = board_ptr->neighbor_flags_count(x, y);
+  const int bombs_around = board_ptr->neighbor_bombs_count(x, y);
   api->log(addon_api_t::log_level_t::debug, "cell_check_handler: flags_around={}, bombs_around={} for cell x={}, y={}", flags_around, bombs_around, x, y);
 
   if ( flags_around != bombs_around ) {
@@ -74,11 +74,11 @@ void cell_check_handler (SessionPtr session) {
 
   api->log(addon_api_t::log_level_t::debug, "cell_check_handler: revealing neighbors of cell x={}, y={}", x, y);
   std::vector<handlers::reveal_result_t> revealed;
-  for ( const auto& [nx, ny]: field_ptr->neighbors(x, y) ) {
+  for ( const auto& [nx, ny]: board_ptr->neighbors(x, y) ) {
     api->log(addon_api_t::log_level_t::debug, "cell_check_handler: checking neighbor cell x={}, y={}", nx, ny);
-    if ( !field_ptr->is_revealed(nx, ny) && !field_ptr->is_flag(nx, ny) ) {
+    if ( !board_ptr->is_revealed(nx, ny) && !board_ptr->is_flag(nx, ny) ) {
       api->log(addon_api_t::log_level_t::debug, "cell_check_handler: revealing neighbor cell x={}, y={}", nx, ny);
-      const std::vector<handlers::reveal_result_t> local = handlers::reveal_cells(*field_ptr, nx, ny);
+      const std::vector<handlers::reveal_result_t> local = handlers::reveal_cells(*board_ptr, nx, ny);
       api->log(addon_api_t::log_level_t::debug, "cell_check_handler: revealed {} cells around x={}, y={}", local.size( ), nx, ny);
       revealed.append_range(local);
     }
@@ -99,7 +99,7 @@ void cell_check_handler (SessionPtr session) {
     cell.emplace("bomb", rc < 0);
     cells.emplace_back(cell);
   }
-  r.add_field("cells", cells).add_field("status", boomed ? "boom" : "ok");
+  r.add_property("cells", cells).add_property("status", boomed ? "boom" : "ok");
   return r.send(restbed::OK, content_type);
 }
 

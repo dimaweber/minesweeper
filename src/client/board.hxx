@@ -3,7 +3,13 @@
 #include <cstddef>
 #include <vector>
 
-enum class cell_state_t { hidden, flagged, revealed, boom };
+namespace ui {
+enum class cell_state_t {
+  hidden,
+  flagged,
+  revealed,
+  boom,
+};
 
 struct cell_t {
   cell_state_t state {cell_state_t::hidden};
@@ -18,6 +24,7 @@ public:
   [[nodiscard]] std::size_t width ( ) const {
     return w_;
   }
+
   [[nodiscard]] std::size_t height ( ) const {
     return h_;
   }
@@ -39,3 +46,4 @@ private:
     return static_cast<std::size_t>(y - 1) * w_ + static_cast<std::size_t>(x - 1);
   }
 };
+}  // namespace ui

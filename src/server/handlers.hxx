@@ -14,14 +14,14 @@ struct reveal_result_t {
   int x, y, count;
 };
 
-std::vector<reveal_result_t> reveal_cells (field_t& field, int x, int y);
+std::vector<reveal_result_t> reveal_cells (board_t& field, int x, int y);
 
 }
 
 void session_new_handler(SessionPtr session);
-void field_size_handler(SessionPtr session);
-void field_bombs_handler(SessionPtr session);
-void field_fully_revealed_handler(SessionPtr session);
+void board_size_handler(SessionPtr session);
+void board_bombs_handler(SessionPtr session);
+void board_fully_revealed_handler(SessionPtr session);
 void cell_reveal_handler(SessionPtr session);
 void cell_flag_handler(SessionPtr session);
-void field_check_handler(SessionPtr session);
+void board_check_handler(SessionPtr session);

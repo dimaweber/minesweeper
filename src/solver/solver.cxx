@@ -93,7 +93,7 @@ struct box_t {
   std::size_t h;
 };
 
-struct field_t {
+struct board_t {
   box_t                  size;
   std::vector<std::byte> data;
 

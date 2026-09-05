@@ -20,22 +20,22 @@ namespace {
   constexpr int COLOR_PAIR_WIN       = 7;
   constexpr int COLOR_PAIR_LOSE      = 8;
 
-  std::string symbol_for (const cell_t& cell) {
+  std::string symbol_for (const ui::cell_t& cell) {
     switch ( cell.state ) {
-      case cell_state_t::hidden:   return "·";
-      case cell_state_t::flagged:  return "⚑";
-      case cell_state_t::boom:     return "💣";
-      case cell_state_t::revealed: return cell.count == 0 ? " " : std::string(1, static_cast<char>('0' + cell.count));
+      case ui::cell_state_t::hidden:   return "·";
+      case ui::cell_state_t::flagged:  return "⚑";
+      case ui::cell_state_t::boom:     return "💣";
+      case ui::cell_state_t::revealed: return cell.count == 0 ? " " : std::string(1, static_cast<char>('0' + cell.count));
     }
     return "?";
   }
 
-  int color_for (const cell_t& cell) {
+  int color_for (const ui::cell_t& cell) {
     switch ( cell.state ) {
-      case cell_state_t::hidden:   return COLOR_PAIR_HIDDEN;
-      case cell_state_t::flagged:  return COLOR_PAIR_FLAGGED;
-      case cell_state_t::boom:     return COLOR_PAIR_BOOM;
-      case cell_state_t::revealed: return COLOR_PAIR_REVEALED;
+      case ui::cell_state_t::hidden:   return COLOR_PAIR_HIDDEN;
+      case ui::cell_state_t::flagged:  return COLOR_PAIR_FLAGGED;
+      case ui::cell_state_t::boom:     return COLOR_PAIR_BOOM;
+      case ui::cell_state_t::revealed: return COLOR_PAIR_REVEALED;
     }
     return COLOR_PAIR_HIDDEN;
   }
@@ -92,7 +92,7 @@ namespace {
     attroff(COLOR_PAIR(pair_id));
   }
 
-  void draw (const board_t& board, int cursor_x, int cursor_y, int bombs_left, int bombs_total, const std::string& message) {
+  void draw (const ui::board_t& board, int cursor_x, int cursor_y, int bombs_left, int bombs_total, const std::string& message) {
     erase( );
 
     mvprintw(0, 0, "Minesweeper -- bombs left: %d/%d", bombs_left, bombs_total);
@@ -113,9 +113,9 @@ namespace {
 
         draw_cell_box(base_row, base_col, selected);
 
-        const cell_t& cell = board.at(bx + 1, by + 1);
-        const bool    bold = cell.state == cell_state_t::flagged ||
-                              (cell.state == cell_state_t::revealed && cell.count > 0);
+        const ui::cell_t& cell = board.at(bx + 1, by + 1);
+        const bool    bold = cell.state == ui::cell_state_t::flagged ||
+                              (cell.state == ui::cell_state_t::revealed && cell.count > 0);
         attron(COLOR_PAIR(color_for(cell)));
         if ( bold )
           attron(A_BOLD);
@@ -194,14 +194,14 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
     init_pair(COLOR_PAIR_LOSE, COLOR_WHITE, COLOR_RED);
   }
 
-  board_t board(width, height);
+  ui::board_t board(width, height);
   int      cursor_x   = 1;
   int      cursor_y   = 1;
   int      bombs_left = bombs_total;
   bool     game_over  = false;
   std::string message;
 
-  const bombs_result_t bombs = api.field_bombs();
+  const bombs_result_t bombs = api.board_bombs();
   if ( bombs.ok ) {
     bombs_left  = bombs.left;
     bombs_total = bombs.total;
@@ -211,11 +211,11 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
   // revealed and, if so, runs the win/lose check and shows the result as a popup
   // window on top of the board.
   const auto check_game_end = [&] ( ) {
-    const std::optional<bool> fully = api.field_fully_revealed();
+    const std::optional<bool> fully = api.board_fully_revealed();
     if ( !fully || !*fully )
       return;
 
-    const check_result_t check = api.field_check();
+    const check_result_t check = api.board_check();
     if ( !check.ok )
       return;
 
@@ -250,6 +250,8 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
       case '\n':
       case '\r':
       case KEY_ENTER:
+      case 'o':
+      case 'O':
         {
           message.clear( );
           const reveal_result_t result = api.cell_reveal( cursor_x, cursor_y);
@@ -257,7 +259,7 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
             message = "error: " + result.error;
           } else if ( result.boom ) {
             for ( const auto& cell: result.cells ) {
-              board.at(cell.x, cell.y).state = cell_state_t::boom;
+              board.at(cell.x, cell.y).state = ui::cell_state_t::boom;
             }
             draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "");
             draw_result_window("Boom! You lose. Press any key to exit.", COLOR_PAIR_LOSE);
@@ -265,7 +267,7 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
             game_over = true;
           } else {
             for ( const auto& cell: result.cells ) {
-              board.at(cell.x, cell.y).state = cell_state_t::revealed;
+              board.at(cell.x, cell.y).state = ui::cell_state_t::revealed;
               board.at(cell.x, cell.y).count = cell.count;
             }
             check_game_end( );
@@ -280,7 +282,7 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
           message = "error: " + result.error;
         } else if ( result.boom ) {
           for ( const auto& cell: result.cells ) {
-            board.at(cell.x, cell.y).state = cell_state_t::boom;
+            board.at(cell.x, cell.y).state = ui::cell_state_t::boom;
           }
           draw(board, cursor_x, cursor_y, bombs_left, bombs_total, "");
           draw_result_window("Boom! You lose. Press any key to exit.", COLOR_PAIR_LOSE);
@@ -288,7 +290,7 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
           game_over = true;
         } else {
           for ( const auto& cell: result.cells ) {
-            board.at(cell.x, cell.y).state = cell_state_t::revealed;
+            board.at(cell.x, cell.y).state = ui::cell_state_t::revealed;
             board.at(cell.x, cell.y).count = cell.count;
           }
           check_game_end( );
@@ -296,14 +298,16 @@ void run_game (client_api_t& api, std::size_t width, std::size_t height, int bom
         break;
       }
       case ' ':
+      case 'F':
+      case 'f':
         {
           message.clear( );
           const flag_result_t result = api.cell_flag( cursor_x, cursor_y);
           if ( !result.ok ) {
             message = "error: " + result.error;
           } else {
-            board.at(cursor_x, cursor_y).state = result.flagged ? cell_state_t::flagged : cell_state_t::hidden;
-            const bombs_result_t refreshed = api.field_bombs();
+            board.at(cursor_x, cursor_y).state = result.flagged ? ui::cell_state_t::flagged : ui::cell_state_t::hidden;
+            const bombs_result_t refreshed = api.board_bombs();
             if ( refreshed.ok ) {
               bombs_left  = refreshed.left;
               bombs_total = refreshed.total;

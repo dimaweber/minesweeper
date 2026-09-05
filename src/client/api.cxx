@@ -6,15 +6,15 @@
 client_api_t::client_api_t (std::string host, uint16_t port, bool secure) : http_ {std::move(host), port, secure} {
 }
 
-std::optional<client_api_t::token_t> client_api_t::session_new (std::optional<field_id_t> field_id) const {
+std::optional<client_api_t::token_t> client_api_t::session_new (std::optional<board_id_t> board_id) const {
   http_params_t params;
-  if ( field_id ) {
-    params.emplace_back("field_id", std::to_string(*field_id));
+  if ( board_id ) {
+    params.emplace_back("board_id", std::to_string(*board_id));
   }
 
   const http_response_t response = http_.post("/session/new", params);
   if ( !response.ok ) {
-    SPDLOG_ERROR("field/new failed: status {}, body {}", response.status, response.body);
+    SPDLOG_ERROR("board/new failed: status {}, body {}", response.status, response.body);
     return std::nullopt;
   }
 
@@ -25,10 +25,10 @@ std::optional<client_api_t::token_t> client_api_t::session_new (std::optional<fi
   return json.at("token").get<token_t>( );
 }
 
-std::optional<std::pair<std::size_t, std::size_t>> client_api_t::field_size ( ) const {
-  const http_response_t response = http_.get("/field/size", { });
+std::optional<std::pair<std::size_t, std::size_t>> client_api_t::board_size ( ) const {
+  const http_response_t response = http_.get("/board/size", { });
   if ( !response.ok ) {
-    SPDLOG_ERROR("field/size failed: status {}, body {}", response.status, response.body);
+    SPDLOG_ERROR("board/size failed: status {}, body {}", response.status, response.body);
     return std::nullopt;
   }
 
@@ -39,11 +39,11 @@ std::optional<std::pair<std::size_t, std::size_t>> client_api_t::field_size ( ) 
   return std::make_pair(json.at("width").get<std::size_t>( ), json.at("height").get<std::size_t>( ));
 }
 
-bombs_result_t client_api_t::field_bombs ( ) const {
+bombs_result_t client_api_t::board_bombs ( ) const {
   bombs_result_t        result;
-  const http_response_t response = http_.get("/field/bombs", { });
+  const http_response_t response = http_.get("/board/bombs", { });
   if ( !response.ok ) {
-    SPDLOG_ERROR("field/bombs failed: status {}, body {}", response.status, response.body);
+    SPDLOG_ERROR("board/bombs failed: status {}, body {}", response.status, response.body);
     return result;
   }
 
@@ -148,10 +148,10 @@ flag_result_t client_api_t::cell_flag (int x, int y) const {
   return result;
 }
 
-std::optional<bool> client_api_t::field_fully_revealed ( ) const {
-  const http_response_t response = http_.get("/field/fully_revealed", { });
+std::optional<bool> client_api_t::board_fully_revealed ( ) const {
+  const http_response_t response = http_.get("/board/fully_revealed", { });
   if ( !response.ok ) {
-    SPDLOG_ERROR("field/fully_revealed failed: status {}, body {}", response.status, response.body);
+    SPDLOG_ERROR("board/fully_revealed failed: status {}, body {}", response.status, response.body);
     return std::nullopt;
   }
 
@@ -162,9 +162,9 @@ std::optional<bool> client_api_t::field_fully_revealed ( ) const {
   return json.at("fully_revealed").get<bool>( );
 }
 
-check_result_t client_api_t::field_check ( ) const {
+check_result_t client_api_t::board_check ( ) const {
   check_result_t        result;
-  const http_response_t response = http_.post("/field/check", { });
+  const http_response_t response = http_.post("/board/check", { });
 
   const nlohmann::json json = nlohmann::json::parse(response.body, nullptr, false);
   if ( !response.ok ) {

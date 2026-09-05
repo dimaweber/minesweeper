@@ -8,7 +8,7 @@
 #include "http.hxx"
 
 using client_id_t = uint64_t;
-using field_id_t  = uint64_t;
+using board_id_t  = uint64_t;
 
 struct revealed_cell_t {
   int x {0};
@@ -47,11 +47,11 @@ public:
 
   client_api_t(std::string host, uint16_t port, bool secure);
 
-  [[nodiscard]] std::optional<token_t>                             session_new(std::optional<field_id_t> field_id = std::nullopt) const;
-  [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> field_size( ) const;
-  [[nodiscard]] bombs_result_t                                     field_bombs( ) const;
-  [[nodiscard]] std::optional<bool>                                field_fully_revealed( ) const;
-  [[nodiscard]] check_result_t                                     field_check( ) const;
+  [[nodiscard]] std::optional<token_t>                             session_new(std::optional<board_id_t> board_id = std::nullopt) const;
+  [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> board_size( ) const;
+  [[nodiscard]] bombs_result_t                                     board_bombs( ) const;
+  [[nodiscard]] std::optional<bool>                                board_fully_revealed( ) const;
+  [[nodiscard]] check_result_t                                     board_check( ) const;
   [[nodiscard]] reveal_result_t                                    cell_reveal(int x, int y) const;
   [[nodiscard]] flag_result_t                                      cell_flag(int x, int y) const;
   [[nodiscard]] reveal_result_t                                    cell_check(int x, int y) const;
