@@ -8,28 +8,21 @@
 
 #include <CLI/CLI.hpp>
 #include <corvusoft/restbed/request.hpp>
-#include <corvusoft/restbed/resource.hpp>
 #include <corvusoft/restbed/service.hpp>
 #include <corvusoft/restbed/settings.hpp>
 #include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <restbed>
 #include <string>
-#include <unordered_map>
 
-#include "api.hxx"
+#include "api_impl.hxx"
 #include "handlers.hxx"
 #include "inc/logger.hxx"
 #include "rsa.hxx"
 
-struct resource_t {
-  const std::string                     path;
-  const http_methods_t                  method;
-  const std::function<void(SessionPtr)> handler;
-};
-
-std::shared_ptr<addon_api_t> api;
+std::shared_ptr<addon_api_i> api;
 
 class rb_log : public restbed::Logger {
   std::shared_ptr<spdlog::sinks::sink> console;
@@ -92,20 +85,29 @@ public:
 
 std::vector<void*> plugin_handles;
 
-bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_t> api) {
-  if constexpr ( !SERVER_SUPPORT_PLUGINS )
+[[nodiscard]]
+consteval bool server_support_plugins ( ) noexcept {
+#if SERVER_SUPPORT_PLUGINS
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_i> api) {
+  if constexpr ( !server_support_plugins( ) )
     return false;
 
   SPDLOG_INFO("Loading plugins from {}", plugins_dir);
   for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
     if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
       SPDLOG_INFO("Loading plugin {}", entry.path( ));
-      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL );
+      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL);
       if ( !handle ) {
         SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
         continue;
       }
-      using init_func_t     = void (*)(std::shared_ptr<addon_api_t>);
+      using init_func_t     = void (*)(std::shared_ptr<addon_api_i>);
       init_func_t init_func = reinterpret_cast<init_func_t>(::dlsym(handle, "init_plugin"));
       if ( !init_func ) {
         SPDLOG_ERROR("Failed to find init_plugin in {}: {}", entry.path( ), ::dlerror( ));
@@ -121,7 +123,7 @@ bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<add
 }
 
 void unload_plugins ( ) {
-  if constexpr ( !SERVER_SUPPORT_PLUGINS )
+  if constexpr ( !server_support_plugins( ) )
     return;
 
   SPDLOG_INFO("Unloading plugins");
@@ -135,20 +137,7 @@ void unload_plugins ( ) {
       ::dlclose(handle);
     }
   }
-}
-
-std::vector<resource_t> resources {
-    {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
-    {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler          },
-    {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler         },
-    {.path = "board/fully_revealed", .method = http_methods_t::GET,  .handler = board_fully_revealed_handler},
-    {.path = "board/check",          .method = http_methods_t::POST, .handler = board_check_handler         },
-    {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
-    {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
-};
-
-void add_resource (std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) {
-  resources.emplace_back(std::string(path), method, handler);
+  plugin_handles.clear( );
 }
 
 [[nodiscard]]
@@ -163,8 +152,7 @@ int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
 
   SPDLOG_DEBUG("Starting minesweeper server");
-  api               = std::make_shared<addon_api_t>( );
-  api->add_resource = add_resource;
+  api = std::make_shared<addon_api_t>( );
 
   CLI::App app("Server for minesweeper");
 
@@ -175,14 +163,18 @@ int main (int argc, const char* argv[]) {
   bool                      no_http         = false;
   bool                      no_https        = false;
   std::filesystem::path     plugins_dir {get_exe_directory( ) / "plugins"};
+  std::filesystem::path     rsa_priv_key_path {api->rsa_priv_key_path( )};
+  std::filesystem::path     rsa_pub_key_path {api->rsa_pub_key_path( )};
+  std::filesystem::path     ssl_cert_path {api->ssl_cert_path( )};
+  std::filesystem::path     ssl_dh_path {api->ssl_dh_path( )};
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
   app.add_option("-l,--log-level", log_level, "Log level")->transform(CLI::CheckedTransformer(spdlog_level_conversion_table, CLI::ignore_case));
-  app.add_option("--rsa-priv-key", api->rsa_priv_key_path, "Path to RSA private key")->default_val(api->rsa_priv_key_path);
-  app.add_option("--rsa-pub-key", api->rsa_pub_key_path, "Path to RSA public key")->default_val(api->rsa_pub_key_path);
-  [[maybe_unused]] auto ssl_cert_opt        = app.add_option("--ssl-cert", api->ssl_cert_path, "Path to SSL certificate")->default_val(api->ssl_cert_path);
-  [[maybe_unused]] auto ssl_dh_opt          = app.add_option("--ssl-dh", api->ssl_dh_path, "Path to SSL Diffie-Hellman parameters")->default_val(api->ssl_dh_path);
+  [[maybe_unused]] auto rsa_priv_key_opt    = app.add_option("--rsa-priv-key", rsa_priv_key_path, "Path to RSA private key");
+  [[maybe_unused]] auto rsa_pub_key_opt     = app.add_option("--rsa-pub-key", rsa_pub_key_path, "Path to RSA public key");
+  [[maybe_unused]] auto ssl_cert_opt        = app.add_option("--ssl-cert", ssl_cert_path, "Path to SSL certificate")->default_val(ssl_cert_path);
+  [[maybe_unused]] auto ssl_dh_opt          = app.add_option("--ssl-dh", ssl_dh_path, "Path to SSL Diffie-Hellman parameters")->default_val(ssl_dh_path);
   [[maybe_unused]] auto create_ssl_cert_opt = app.add_flag("--create-ssl-cert", create_ssl_cert, "Create SSL certificate if it does not exist")->default_val(false);
   [[maybe_unused]] auto no_http_opt         = app.add_flag("--no-http", no_http, "Disable HTTP connections")->default_val(false);
   [[maybe_unused]] auto no_https_opt        = app.add_flag("--no-https", no_https, "Disable HTTPS connections")->default_val(false);
@@ -201,8 +193,12 @@ int main (int argc, const char* argv[]) {
   }
 
   CLI11_PARSE(app, argc, argv);
-
   spdlog::set_level(log_level);
+
+  api->set_rsa_priv_key_path(rsa_priv_key_path);
+  api->set_rsa_pub_key_path(rsa_pub_key_path);
+  api->set_ssl_cert_path(ssl_cert_path);
+  api->set_ssl_dh_path(ssl_dh_path);
 
   if constexpr ( SERVER_SUPPORT_PLUGINS ) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
@@ -220,9 +216,9 @@ int main (int argc, const char* argv[]) {
   }
 
   if ( create_ssl_cert ) {
-    if ( !std::filesystem::exists(api->ssl_cert_path) || !std::filesystem::exists(api->ssl_dh_path) ) {
+    if ( !std::filesystem::exists(api->ssl_cert_path( )) || !std::filesystem::exists(api->ssl_dh_path( )) ) {
       SPDLOG_INFO("Creating self-signed SSL certificate and Diffie-Hellman parameters");
-      if ( !create_self_signed_ssl_cert(api->ssl_cert_path, api->ssl_dh_path, api->rsa_priv_key_path) ) {
+      if ( !create_self_signed_ssl_cert(api->ssl_cert_path( ), api->ssl_dh_path( ), api->rsa_priv_key_path( )) ) {
         SPDLOG_ERROR("Failed to create self-signed SSL certificate and Diffie-Hellman parameters");
         return EXIT_FAILURE;
       }
@@ -232,7 +228,8 @@ int main (int argc, const char* argv[]) {
   }
 
   for ( int i = 0; i < 10; ++i ) {
-    api->boards.emplace(i, board_t {10, 10});
+    const auto p = api->create_board(10, 10, 10);
+    api->add_board(p);
   }
 
   const auto settings = std::make_shared<restbed::Settings>( );
@@ -243,9 +240,9 @@ int main (int argc, const char* argv[]) {
   if ( !no_https ) {
     const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
     ssl_settings->set_http_disabled(no_http);
-    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path)});
-    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path)});
-    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path)});
+    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path( ))});
+    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path( ))});
+    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path( ))});
     ssl_settings->set_port(ssl_port);
     settings->set_ssl_settings(ssl_settings);
   }
@@ -253,16 +250,20 @@ int main (int argc, const char* argv[]) {
   restbed::Service service;
   service.set_logger(std::make_shared<rb_log>( ));
 
-#if USE_PALSIGSLOT
-  api->ready_to_load_resources( );
-#endif
-
-  for ( const auto& [path, method, handler]: resources ) {
-    const auto resource = std::make_shared<restbed::Resource>( );
-    resource->set_path(path);
-    resource->set_method_handler(to_string<const char*>(method), handler);
-    service.publish(resource);
+  std::vector<addon_api_i::resource_t> entrypoints {
+      {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
+      {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler          },
+      {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler         },
+      {.path = "board/fully_revealed", .method = http_methods_t::GET,  .handler = board_fully_revealed_handler},
+      {.path = "board/check",          .method = http_methods_t::POST, .handler = board_check_handler         },
+      {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler         },
+      {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler           },
+  };
+  for ( const auto& resource: entrypoints ) {
+    api->add_resource(resource);
   }
+
+  api->install_entrypoints(service);
 
   if ( !no_http ) {
     SPDLOG_INFO("Listening on port {} for HTTP", port);

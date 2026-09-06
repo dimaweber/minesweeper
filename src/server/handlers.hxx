@@ -2,7 +2,7 @@
 
 #include <expected>
 
-#include "api.hxx"
+#include "plugins/api.hxx"
 
 template<typename T>
 using result_t = std::expected<T, std::string>;
@@ -11,10 +11,11 @@ namespace handlers {
 result_t<client_id_t> authorize_client(SessionPtr session);
 
 struct reveal_result_t {
-  int x, y, count;
+  coord_t coord;
+  int count;
 };
 
-std::vector<reveal_result_t> reveal_cells (board_t& field, int x, int y);
+std::vector<reveal_result_t> reveal_cells (std::shared_ptr<board_i> board, coord_t coord);
 
 }
 
