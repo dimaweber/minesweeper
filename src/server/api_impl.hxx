@@ -144,6 +144,9 @@ struct addon_api_t : public addon_api_i {
 
   std::shared_ptr<board_i> create_board (std::size_t width, std::size_t height, int bombs_count) override;
 
+  http_api_i* http_api ( ) override {
+    return nullptr;
+  }
 private:
   using board_map_t = std::unordered_map<board_id_t, std::shared_ptr<board_i>>;
   clients_t                clients_;

@@ -4,9 +4,6 @@
 
 #include "plugins/api.hxx"
 
-template<typename T>
-using result_t = std::expected<T, std::string>;
-
 namespace handlers {
 result_t<client_id_t> authorize_client(SessionPtr session);
 

@@ -113,7 +113,8 @@ std::vector<reveal_result_t> reveal_cells (std::shared_ptr<board_i> board, coord
       queue.pop_front( );
 
       for ( const coord_t& neighbor_coord: board->neighbors(qcoord) ) {
-        if ( !visited.emplace(neighbor_coord).second )
+        const auto [it, ok] = visited.emplace(neighbor_coord);
+        if (!ok)
           continue;
         const cell_i& cell = board->cell(neighbor_coord);
         if ( cell.is_flag( ) || cell.is_revealed( ) )

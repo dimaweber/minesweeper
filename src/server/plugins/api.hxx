@@ -4,6 +4,7 @@
 
 #include <corvusoft/restbed/service.hpp>
 #include <corvusoft/restbed/session.hpp>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -20,15 +21,29 @@
 
 template<size_t dimention = 2>
   requires(dimention > 0)
-struct multidementional_coord_t {
-  std::array<int, dimention> vec { };
+struct m_coord_t {
 
-  multidementional_coord_t ( ) {
+  m_coord_t ( ) {
     std::fill(vec.begin( ), vec.end( ), -1);
   }
 
+  m_coord_t(const m_coord_t& other) = default;
+  m_coord_t(m_coord_t&& other) noexcept = default;
+  m_coord_t& operator=(const m_coord_t& other) = default;
+  m_coord_t& operator=(m_coord_t&& other) noexcept = default;
+
+  [[nodiscard]] constexpr bool operator==(const m_coord_t& other) const noexcept {
+    return std::ranges::equal(vec, other.vec);
+  }
+  [[nodiscard]] constexpr std::strong_ordering operator<=>(const m_coord_t& other) const noexcept {
+    if ( *this == other ) {
+      return std::strong_ordering::equal;
+    }
+    return std::lexicographical_compare(vec.begin( ), vec.end( ), other.vec.begin( ), other.vec.end( )) ? std::strong_ordering::less : std::strong_ordering::greater;
+  }
+
   template<typename... Args>
-  multidementional_coord_t(Args... args)
+  m_coord_t(Args... args)
     requires(sizeof...(args) == dimention)
       : vec {args...} {
   }
@@ -92,20 +107,33 @@ struct multidementional_coord_t {
   [[nodiscard]] consteval size_t rank ( ) const noexcept {
     return dimention;
   }
+
+  [[nodiscard]]
+  std::string to_string ( ) const noexcept {
+    return fmt::format("({})", fmt::join(vec, ", "));
+  }
+
+private:
+  std::array<int, dimention> vec { };
 };
 
-using coord_t = multidementional_coord_t<2>;
+using coord_t = m_coord_t<2>;
 
 FMT_BEGIN_NAMESPACE
 
+template<typename T, size_t n>
+[[nodiscard]] constexpr  T to_string(const m_coord_t<n>& coord) {
+  return T{coord.to_string()};
+}
+
 template<size_t dimention>
-struct formatter<multidementional_coord_t<dimention>> : formatter<std::string> {
+struct formatter<m_coord_t<dimention>> : formatter<std::string> {
   template<typename FormatContext>
-  auto format (const multidementional_coord_t<dimention>& coord, FormatContext& ctx) const {
+  auto format (const m_coord_t<dimention>& coord, FormatContext& ctx) const {
     if ( !coord ) {
       return formatter<std::string>::format("nullopt", ctx);
     }
-    return formatter<std::string>::format(fmt::format("({})", fmt::join(coord.vec, ", ")), ctx);
+    return formatter<std::string>::format(coord.to_string(), ctx);
   }
 };
 
@@ -223,6 +251,13 @@ protected:
   virtual rest_api_response_i& add_raw_header(const std::string& key, const std::string& value) = 0;
 };
 
+template<typename T>
+using result_t = std::expected<T, std::string>;
+
+struct http_api_i {
+  virtual result_t<client_id_t> authorize_client(SessionPtr session) const = 0;
+};
+
 struct addon_api_i {
   struct resource_t {
     const std::string                     path;
@@ -272,6 +307,9 @@ struct addon_api_i {
   virtual std::shared_ptr<board_i>             create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
 
   virtual void install_entrypoints(restbed::Service& service) = 0;
+
+  virtual http_api_i* http_api( ) = 0;
+
 #if USE_PALSIGSLOT
   virtual sigslot::signal<>& ready_to_load_resources_signal( ) = 0;
   virtual void               on_ready_to_load_resources( )     = 0;

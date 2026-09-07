@@ -1,6 +1,4 @@
-#if SERVER_SUPPORT_PLUGINS
-  #include <dlfcn.h>
-#endif
+#include <dlfcn.h>
 #include <fmt/format.h>
 #include <fmt/std.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -85,6 +83,7 @@ public:
 
 std::vector<void*> plugin_handles;
 
+namespace {
 [[nodiscard]]
 consteval bool server_support_plugins ( ) noexcept {
 #if SERVER_SUPPORT_PLUGINS
@@ -139,6 +138,7 @@ void unload_plugins ( ) {
   }
   plugin_handles.clear( );
 }
+}  // namespace
 
 [[nodiscard]]
 std::filesystem::path get_exe_directory ( ) noexcept {
@@ -188,8 +188,8 @@ int main (int argc, const char* argv[]) {
   ssl_dh_opt->excludes(create_ssl_cert_opt);
   create_ssl_cert_opt->excludes(ssl_cert_opt)->excludes(ssl_dh_opt);
 
-  if constexpr ( !SERVER_SUPPORT_PLUGINS ) {
-    plugins_dir_opt->excludes(plugins_dir_opt);
+  if constexpr ( !server_support_plugins( ) ) {
+    app.remove_option(plugins_dir_opt);
   }
 
   CLI11_PARSE(app, argc, argv);
@@ -200,7 +200,7 @@ int main (int argc, const char* argv[]) {
   api->set_ssl_cert_path(ssl_cert_path);
   api->set_ssl_dh_path(ssl_dh_path);
 
-  if constexpr ( SERVER_SUPPORT_PLUGINS ) {
+  if constexpr ( server_support_plugins( ) ) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
     if ( !plugins_dir.empty( ) ) {
       SPDLOG_INFO("Found plugins directory {}", plugins_dir);

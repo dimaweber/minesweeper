@@ -4,3 +4,10 @@
 # build
 cmake-build-*/
 build/
+
+# runtime
+restbed.log
+minesweeper.crt
+minesweeper_dh.pem
+minesweeper_rsa.pem
+minesweeper_rsa.pub

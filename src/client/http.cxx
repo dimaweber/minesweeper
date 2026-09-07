@@ -5,6 +5,8 @@
 
 #include <inc/logger.hxx>
 
+using namespace std::chrono_literals;
+
 http_client_t::http_client_t (std::string host, uint16_t port, bool secure) : host_ {std::move(host)}, port_ {port}, secure_ {secure} {
   curl_global_init(CURL_GLOBAL_ALL);
 }
@@ -104,6 +106,9 @@ struct curl_ease_t {
   auto set_timeout (long seconds) noexcept {
     return setopt(CURLOPT_TIMEOUT, seconds);
   }
+  auto set_timeout (std::chrono::steady_clock::duration milliseconds) noexcept {
+    return setopt(CURLOPT_TIMEOUT_MS, std::chrono::duration_cast<std::chrono::milliseconds>(milliseconds).count());
+  }
 };
 
 http_response_t http_client_t::perform (const std::string& url, bool is_post) const {
@@ -125,7 +130,7 @@ http_response_t http_client_t::perform (const std::string& url, bool is_post) co
   curl.set_url(url);
   curl.setopt(CURLOPT_WRITEFUNCTION, write_callback);
   curl.setopt(CURLOPT_WRITEDATA, &response.body);
-  curl.set_timeout(5L);
+  curl.set_timeout(30s);
   if ( is_post ) {
     curl.setopt(CURLOPT_POST, 1L);
     curl.setopt(CURLOPT_POSTFIELDSIZE, 0L);
