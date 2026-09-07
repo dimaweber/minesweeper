@@ -8,10 +8,12 @@
 #endif
 
 #include <corvusoft/restbed/session.hpp>
+#include <deque>
 #include <functional>
 #include <inc/logger.hxx>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <set>
 #include <string>
 #include <wbr/string_manipulations.hxx>
 
@@ -165,6 +167,8 @@ struct board_t : public board_i {
 
   int reveal(const coord_t& coord) override;
 
+  [[nodiscard]] std::vector<reveal_result_t> reveal_cells(const coord_t& coord) override;
+
   [[nodiscard]] int neighbor_bombs_count(const coord_t& coord) const override;
 
   [[nodiscard]] int neighbor_flags_count(const coord_t& coord) const override;
@@ -267,6 +271,45 @@ std::vector<coord_t> board_t::neighbors (const coord_t& c) const {
 int board_t::reveal (const coord_t& coord) {
   cell(coord).set_revealed( );
   return neighbor_bombs_count(coord);
+}
+
+std::vector<reveal_result_t> board_t::reveal_cells (const coord_t& coord) {
+  std::vector<reveal_result_t> revealed;
+  std::set<coord_t>            visited;
+
+  if ( const auto& c = cell(coord); c.is_flag( ) || c.is_revealed( ) ) {
+    return revealed;
+  }
+
+  const int count = reveal(coord);
+  revealed.push_back({coord, count});
+  visited.emplace(coord);
+
+  if ( count == 0 ) {
+    std::deque<coord_t> queue;
+    queue.emplace_back(coord);
+
+    while ( !queue.empty( ) ) {
+      const auto qcoord = queue.front( );
+      queue.pop_front( );
+
+      for ( const coord_t& neighbor_coord: neighbors(qcoord) ) {
+        const auto [it, ok] = visited.emplace(neighbor_coord);
+        if ( !ok )
+          continue;
+        const cell_i& nc = cell(neighbor_coord);
+        if ( nc.is_flag( ) || nc.is_revealed( ) )
+          continue;
+
+        const int n_count = reveal(neighbor_coord);
+        revealed.push_back({neighbor_coord, n_count});
+        if ( n_count == 0 )
+          queue.emplace_back(neighbor_coord);
+      }
+    }
+  }
+
+  return revealed;
 }
 
 int board_t::neighbor_bombs_count (const coord_t& coord) const {

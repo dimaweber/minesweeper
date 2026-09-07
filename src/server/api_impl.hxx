@@ -2,6 +2,7 @@
 #include <corvusoft/restbed/resource.hpp>
 #include <corvusoft/restbed/service.hpp>
 
+#include "http_auth.hxx"
 #include "plugins/api.hxx"
 
 struct client_context_t {
@@ -46,6 +47,12 @@ private:
 
   std::string                       response_body(content_type_t content_type, const parameter_map_t& m);
   std::pair<std::string, headers_t> body(content_type_t content_type);
+};
+
+struct http_api_t : public http_api_i {
+  result_t<client_id_t> authorize_client (SessionPtr session) const override {
+    return http::auth::authorize_client(session);
+  }
 };
 
 struct addon_api_t : public addon_api_i {
@@ -145,12 +152,14 @@ struct addon_api_t : public addon_api_i {
   std::shared_ptr<board_i> create_board (std::size_t width, std::size_t height, int bombs_count) override;
 
   http_api_i* http_api ( ) override {
-    return nullptr;
+    return &http_api_;
   }
+
 private:
   using board_map_t = std::unordered_map<board_id_t, std::shared_ptr<board_i>>;
   clients_t                clients_;
   board_map_t              boards_;
+  http_api_t               http_api_;
   std::atomic<client_id_t> next_client_id_ {1};
   std::string              rsa_private_key_;
   std::string              rsa_public_key_;

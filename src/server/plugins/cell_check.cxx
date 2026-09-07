@@ -6,7 +6,6 @@
 #include <memory>
 #include <sigslot/signal.hpp>
 
-#include "../handlers.hxx"
 #include "api.hxx"
 
 extern "C" {
@@ -33,7 +32,7 @@ void cell_check_handler (SessionPtr session) {
 
   auto r = api->create_response(session);
 
-  const auto board_id = handlers::authorize_client(session);
+  const auto board_id = api->http_api( )->authorize_client(session);
   if ( !board_id ) {
     api->log(addon_api_i::log_level_t::debug, "cell_check_handler: authorization failed: {}", board_id.error( ));
     return r->send_error(restbed::UNAUTHORIZED, content_type_t::json, board_id.error( ));
@@ -77,13 +76,13 @@ void cell_check_handler (SessionPtr session) {
   }
 
   api->log(addon_api_i::log_level_t::debug, "cell_check_handler: revealing neighbors of cell x={}, y={}", x, y);
-  std::vector<handlers::reveal_result_t> revealed;
+  std::vector<reveal_result_t> revealed;
   for ( const auto& neighbor_coord: board_ptr->neighbors(coord) ) {
     api->log(addon_api_i::log_level_t::debug, "cell_check_handler: checking neighbor cell {}", neighbor_coord);
     const cell_i& cell = board_ptr->cell(neighbor_coord);
     if ( !cell.is_revealed( ) && !cell.is_flag( ) ) {
       api->log(addon_api_i::log_level_t::debug, "cell_check_handler: revealing neighbor cell {}", neighbor_coord);
-      const std::vector<handlers::reveal_result_t> local = handlers::reveal_cells(board_ptr, neighbor_coord);
+      const std::vector<reveal_result_t> local = board_ptr->reveal_cells(neighbor_coord);
       api->log(addon_api_i::log_level_t::debug, "cell_check_handler: revealed {} cells around {}", local.size( ), neighbor_coord);
       revealed.append_range(local);
     }

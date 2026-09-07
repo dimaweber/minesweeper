@@ -158,6 +158,11 @@ struct cell_i {
   virtual void set_neighbor_bombs_count(int count) = 0;
 };
 
+struct reveal_result_t {
+  coord_t coord;
+  int     count;
+};
+
 struct board_i {
   virtual ~board_i( ) = default;
 
@@ -190,6 +195,11 @@ struct board_i {
   virtual bool none_of_cell(std::function<bool(const cell_i& cell)> func) const = 0;
 
   virtual int reveal(const coord_t& coord) = 0;
+
+  // Auto-reveal: opening a cell with 0 neighbouring mines recursively opens all
+  // of its neighbours (and, transitively, their neighbours), but this flood-fill
+  // can never open a mine.
+  [[nodiscard]] virtual std::vector<reveal_result_t> reveal_cells(const coord_t& coord) = 0;
 
 protected:
   [[nodiscard]] virtual bool is_valid_x(int x) const noexcept = 0;
@@ -255,6 +265,8 @@ template<typename T>
 using result_t = std::expected<T, std::string>;
 
 struct http_api_i {
+  virtual ~http_api_i( ) = default;
+
   virtual result_t<client_id_t> authorize_client(SessionPtr session) const = 0;
 };
 

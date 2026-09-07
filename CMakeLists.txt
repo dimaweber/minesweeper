@@ -194,6 +194,7 @@ set(SOURCES_COMMON
 set(SOURCES_SERVER
         src/server/server.cxx
         src/server/handlers.cxx
+        src/server/http_auth.cxx
         src/server/rsa.cxx
         src/server/api.cxx
 )
