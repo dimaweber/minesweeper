@@ -210,7 +210,7 @@ std::size_t board_t::height ( ) const noexcept {
 }
 
 size_t board_t::coord_to_index (coord_t coord) const {
-  return (coord->second - 1) * w_ + (coord->first - 1);
+  return (coord[1] - 1) * width( ) + (coord[0] - 1);
 }
 
 auto clients_t::add (client_id_t id, board_id_t board_id, std::shared_ptr<board_i> board) {
@@ -242,9 +242,10 @@ bool board_t::is_valid_y (int y) const noexcept {
 }
 
 std::vector<coord_t> board_t::neighbors (const coord_t& c) const {
-  std::vector<coord_t>                             result;
-  const int                                        x         = c->first;
-  const int                                        y         = c->second;
+  std::vector<coord_t> result;
+  const int            x = c.x(  );
+  const int            y = c.y(  );
+
   const std::initializer_list<std::pair<int, int>> neighbors = {
       {x - 1, y - 1},
       {x,     y - 1},
@@ -255,9 +256,8 @@ std::vector<coord_t> board_t::neighbors (const coord_t& c) const {
       {x,     y + 1},
       {x + 1, y + 1}
   };
-  for ( const auto& n: neighbors ) {
-    const auto nc = coord(n.first, n.second);
-    if ( nc ) {
+  for ( const auto& [fst, snd]: neighbors ) {
+    if ( const auto nc = coord(fst, snd) ) {
       result.push_back(nc);
     }
   }

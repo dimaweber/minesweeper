@@ -18,17 +18,94 @@
   #include <sigslot/signal.hpp>
 #endif
 
-using coord_t = std::optional<std::pair<int, int>>;
+template<size_t dimention = 2>
+  requires(dimention > 0)
+struct multidementional_coord_t {
+  std::array<int, dimention> vec { };
+
+  multidementional_coord_t ( ) {
+    std::fill(vec.begin( ), vec.end( ), -1);
+  }
+
+  template<typename... Args>
+  multidementional_coord_t(Args... args)
+    requires(sizeof...(args) == dimention)
+      : vec {args...} {
+  }
+
+  int operator[] (size_t index) const noexcept {
+    return vec[index];
+  }
+
+  [[nodiscard]] operator bool ( ) const noexcept {
+    return std::ranges::all_of(vec, [] (int v) { return v > 0; });
+  }
+
+  std::string dim_name (int i) const noexcept{
+    switch ( i ) {
+      case 0:  return "x";
+      case 1:  return "y";
+      case 2:  return "z";
+      case 3:  return "i";
+      case 4:  return "j";
+      case 5:  return "k";
+      default: return fmt::format("dim{}", i);
+    }
+  }
+
+  [[nodiscard]] int x ( ) const noexcept
+    requires(dimention > 0)
+  {
+    return vec[0];
+  }
+
+  [[nodiscard]] int y ( ) const noexcept
+    requires(dimention > 1)
+  {
+    return vec[1];
+  }
+
+  [[nodiscard]] int z ( ) const noexcept
+    requires(dimention > 2)
+  {
+    return vec[2];
+  }
+
+  [[nodiscard]] int i ( ) const noexcept
+    requires(dimention > 3)
+  {
+    return vec[3];
+  }
+
+  [[nodiscard]] int j ( ) const noexcept
+    requires(dimention > 4)
+  {
+    return vec[4];
+  }
+
+  [[nodiscard]] int k ( ) const noexcept
+    requires(dimention > 5)
+  {
+    return vec[5];
+  }
+
+  [[nodiscard]] consteval size_t rank ( ) const noexcept {
+    return dimention;
+  }
+};
+
+using coord_t = multidementional_coord_t<2>;
 
 FMT_BEGIN_NAMESPACE
 
-template<>
-struct formatter<coord_t> : formatter<std::string> {
+template<size_t dimention>
+struct formatter<multidementional_coord_t<dimention>> : formatter<std::string> {
   template<typename FormatContext>
-  auto format (const coord_t& coord, FormatContext& ctx) const {
-    if ( !coord )
+  auto format (const multidementional_coord_t<dimention>& coord, FormatContext& ctx) const {
+    if ( !coord ) {
       return formatter<std::string>::format("nullopt", ctx);
-    return formatter<std::string>::format(fmt::format("({}, {})", coord->first, coord->second), ctx);
+    }
+    return formatter<std::string>::format(fmt::format("({})", fmt::join(coord.vec, ", ")), ctx);
   }
 };
 
@@ -46,7 +123,10 @@ struct cell_i {
 
   virtual void toggle_flag( ) = 0;
 
-  [[nodiscard]] virtual int neighbor_bombs_count( ) const {return -1;}
+  [[nodiscard]] virtual int neighbor_bombs_count ( ) const {
+    return -1;
+  }
+
   virtual void set_neighbor_bombs_count(int count) = 0;
 };
 
@@ -60,8 +140,8 @@ struct board_i {
 
   [[nodiscard]] coord_t coord (int x, int y) const noexcept {
     if ( is_valid_x(x) && is_valid_y(y) )
-      return std::make_pair(x, y);
-    return std::nullopt;
+      return coord_t {x, y};
+    return coord_t { };
   }
 
   [[nodiscard]] virtual cell_i&       cell(const coord_t& coord)       = 0;

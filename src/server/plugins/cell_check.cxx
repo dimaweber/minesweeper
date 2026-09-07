@@ -98,8 +98,8 @@ void cell_check_handler (SessionPtr session) {
       boomed = true;
     }
     parameter_map_t cell;
-    cell.emplace("x", xy->first);
-    cell.emplace("y", xy->second);
+    cell.emplace("x", xy[0]);
+    cell.emplace("y", xy[1]);
     cell.emplace("count", count);
     cell.emplace("bomb", count < 0);
     cells.emplace_back(cell);

@@ -276,7 +276,7 @@ void cell_reveal_handler (SessionPtr session) {
   }
 
   try {
-    auto& cell = board->cell(*coord);
+    auto& cell = board->cell(coord);
     if ( cell.is_flag( ) ) {
       return r->send_error(restbed::BAD_REQUEST, content_type, "can't reveal flagged cell");
     }
@@ -286,8 +286,9 @@ void cell_reveal_handler (SessionPtr session) {
     if ( cell.is_boom( ) ) {
       // boom -- still returned as a (single-element) cells array, for API uniformity.
       parameter_map_t c;
-      c.emplace("x", x);
-      c.emplace("y", y);
+      for ( size_t i = 0; i < coord.rank( ); ++i ) {
+        c.emplace(coord.dim_name(i), coord[i]);
+      }
       r->add_property("status", "boom").add_property("cells", parameter_list_t {c});
       return r->send(restbed::OK, content_type);
     }
@@ -310,8 +311,9 @@ void cell_reveal_handler (SessionPtr session) {
         boomed = true;
       }
       parameter_map_t c;
-      c.emplace("x", rcoord->first);
-      c.emplace("y", rcoord->second);
+      for ( size_t i = 0; i < coord.rank( ); ++i ) {
+        c.emplace(rcoord.dim_name(i), rcoord[i]);
+      }
       c.emplace("count", rc);
       c.emplace("bomb", rc < 0);
       cells.emplace_back(c);
@@ -363,7 +365,7 @@ void cell_flag_handler (SessionPtr session) {
     return r->send_error(restbed::BAD_REQUEST, content_type, "coordinates out of range");
   }
 
-  auto& cell = board->cell(*coord);
+  auto& cell = board->cell(coord);
   if ( cell.is_revealed( ) ) {
     return r->send_error(restbed::BAD_REQUEST, content_type, "can't flag revealed cell");
   }
@@ -373,7 +375,11 @@ void cell_flag_handler (SessionPtr session) {
   }
 
   cell.toggle_flag( );
-  r->add_property("status", "ok").add_property("x", x).add_property("y", y).add_property("flagged", cell.is_flag( ));
+  for ( size_t i = 0; i < coord.rank( ); ++i ) {
+    r->add_property(coord.dim_name(i), coord[i]);
+  }
+
+  r->add_property("status", "ok").add_property("flagged", cell.is_flag( ));
   return r->send(restbed::OK, content_type);
 }
 
