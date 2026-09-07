@@ -8,6 +8,7 @@
 #include <corvusoft/restbed/request.hpp>
 #include <corvusoft/restbed/service.hpp>
 #include <corvusoft/restbed/settings.hpp>
+#include <cstdarg>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -63,21 +64,22 @@ public:
   void log (const Level level, const char* format, ...) override {
     va_list args;
     va_start(args, format);
-    char message[1024];
-    vsprintf(message, format, args);
+    std::array<char, 1024> message;
+    ::vsnprintf(message.data(), message.size(), format, args);
     va_end(args);
 
-    logger->log(convert_level(level), "{}", message);
+    logger->log(convert_level(level), "{}", message.data());
   }
 
   void log_if (bool expr, const Level level, const char* format, ...) override {
     if ( !expr )
       return;
-
     va_list args;
     va_start(args, format);
-    log(level, format, args);
+    std::array<char, 1024> message;
+    ::vsnprintf(message.data(), message.size(), format, args);
     va_end(args);
+    logger->log(convert_level(level), "{}", message.data());
   }
 };
 
@@ -98,27 +100,32 @@ bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<add
     return false;
 
   SPDLOG_INFO("Loading plugins from {}", plugins_dir);
-  for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
-    if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
-      SPDLOG_INFO("Loading plugin {}", entry.path( ));
-      void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL);
-      if ( !handle ) {
-        SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
-        continue;
+  try {
+    for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
+      if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
+        SPDLOG_INFO("Loading plugin {}", entry.path( ));
+        void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL);
+        if ( !handle ) {
+          SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
+          continue;
+        }
+        using init_func_t     = void (*)(std::shared_ptr<addon_api_i>);
+        init_func_t init_func = reinterpret_cast<init_func_t>(::dlsym(handle, "init_plugin"));
+        if ( !init_func ) {
+          SPDLOG_ERROR("Failed to find init_plugin in {}: {}", entry.path( ), ::dlerror( ));
+          ::dlclose(handle);
+          continue;
+        }
+        init_func(api);
+        plugin_handles.push_back(handle);
+        SPDLOG_INFO("Plugin {} loaded successfully", entry.path( ));
       }
-      using init_func_t     = void (*)(std::shared_ptr<addon_api_i>);
-      init_func_t init_func = reinterpret_cast<init_func_t>(::dlsym(handle, "init_plugin"));
-      if ( !init_func ) {
-        SPDLOG_ERROR("Failed to find init_plugin in {}: {}", entry.path( ), ::dlerror( ));
-        ::dlclose(handle);
-        continue;
-      }
-      init_func(api);
-      plugin_handles.push_back(handle);
-      SPDLOG_INFO("Plugin {} loaded successfully", entry.path( ));
     }
+    return true;
+  }catch (const std::filesystem::filesystem_error& e) {
+    SPDLOG_ERROR("Failed to load plugins from {}: {}", plugins_dir, e.what( ));
+    return false;
   }
-  return true;
 }
 
 void unload_plugins ( ) {

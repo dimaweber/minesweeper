@@ -34,28 +34,33 @@ result_t<std::string> get_jwt_from_request (SessionPtr session) {
 }  // namespace
 
 result_t<int> get_id_from_jwt (const std::string& token) {
-  auto verify  = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(api->rsa_public_key( ), api->rsa_private_key( ), "", "")).with_issuer(issuer);
-  auto decoded = jwt::decode(token);
-
+  auto verify = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(api->rsa_public_key( ), api->rsa_private_key( ), "", "")).with_issuer(issuer);
   try {
+    const auto decoded = jwt::decode(token);
+
     verify.verify(decoded);
+
+    const auto client_id_str = decoded.get_payload_claim(client_id_claim).to_json( ).to_str( );
+
+    std::errc ec;
+    const int id = wbr::str::num<int, wbr::str::num_match_t::full>(client_id_str, ec);
+    if ( ec != std::errc { } ) {
+      return std::unexpected("invalid client_id in JWT token");
+    }
+    return id;
   } catch ( const jwt::error::token_verification_exception& e ) {
     SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
+    return std::unexpected("invalid JWT token");
+  } catch ( const std::invalid_argument& e ) {
+    SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
+    return std::unexpected("invalid JWT token");
+  } catch ( const std::runtime_error& error ) {
+    SPDLOG_ERROR("JWT verification failed: {}", error.what( ));
     return std::unexpected("invalid JWT token");
   } catch ( const std::exception& e ) {
     SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
     return std::unexpected("invalid JWT token");
   }
-
-  const auto client_id_str = decoded.get_payload_claim(client_id_claim).to_json( ).to_str( );
-
-  std::errc ec;
-  const int id = wbr::str::num<int, wbr::str::num_match_t::full>(client_id_str, ec);
-  if ( ec != std::errc { } ) {
-    return std::unexpected("invalid client_id in JWT token");
-  }
-
-  return id;
 }
 
 result_t<client_id_t> authorize_client (SessionPtr session) {

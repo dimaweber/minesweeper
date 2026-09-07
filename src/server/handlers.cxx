@@ -20,12 +20,15 @@ void session_new_handler (SessionPtr session) {
   auto r = api->create_response(session);
 
   if ( board_id_str.empty( ) ) {
-    board_id = rand( ) % api->boards_count( );
+    board_id = rand( ) % api->boards_count( ) + 1;
   } else {
     std::errc ec;
     board_id = wbr::str::num<board_id_t, wbr::str::num_match_t::full>(board_id_str, ec);
     if ( ec != std::errc { } ) {
       return r->send_error(restbed::BAD_REQUEST, content_type, "invalid board_id parameter");
+    }
+    if ( board_id == 0 || board_id > api->boards_count( ) ) {
+      return r->send_error(restbed::FORBIDDEN, content_type, "board_id out of range");
     }
   }
 
@@ -40,14 +43,6 @@ void session_new_handler (SessionPtr session) {
   if ( !token ) {
     return r->send_error(restbed::INTERNAL_SERVER_ERROR, content_type, token.error( ));
   }
-  /* next verification is not required, just to make sure we understand lib api correctly */
-  const auto ver_id = http::auth::get_id_from_jwt(*token);
-  if ( !ver_id ) {
-    return r->send_error(restbed::INTERNAL_SERVER_ERROR, content_type, "failed to verify JWT token");
-  }
-  SPDLOG_DEBUG("JWT verification succeeded for client {}: {}", *id, *token);
-  /* end of verification */
-
   r->add_property("token", *token);
   return r->send(restbed::OK, content_type);
 }

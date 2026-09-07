@@ -247,8 +247,8 @@ bool board_t::is_valid_y (int y) const noexcept {
 
 std::vector<coord_t> board_t::neighbors (const coord_t& c) const {
   std::vector<coord_t> result;
-  const int            x = c.x(  );
-  const int            y = c.y(  );
+  const int            x = c.x( );
+  const int            y = c.y( );
 
   const std::initializer_list<std::pair<int, int>> neighbors = {
       {x - 1, y - 1},
@@ -382,14 +382,20 @@ addon_api_t::addon_api_t ( ) {
 }
 
 std::optional<client_id_t> addon_api_t::add_new_client (board_id_t board_id) {
-  const client_id_t id = next_client_id_.fetch_add(1);
-  const auto [it, ok]  = clients_.add(id, board_id, board(board_id));
-  if ( !ok ) {
-    SPDLOG_ERROR("Failed to add new client with id {}", id);
+  try {
+    const client_id_t id = next_client_id_.fetch_add(1);
+    const auto [it, ok]  = clients_.add(id, board_id, board(board_id));
+    if ( !ok ) {
+      SPDLOG_ERROR("Failed to add new client with id {}", id);
+      return std::nullopt;
+    }
+    SPDLOG_DEBUG("Created new client with id {}", it->first);
+    return id;
+  }
+  catch ( const std::out_of_range& e ) {
+    SPDLOG_ERROR("Failed to add new client - board_id {} does not exist: {}", board_id, e.what( ));
     return std::nullopt;
   }
-  SPDLOG_DEBUG("Created new client with id {}", it->first);
-  return id;
 }
 
 std::shared_ptr<board_i> addon_api_t::board_for_client (client_id_t client_id) {
