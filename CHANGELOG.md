@@ -7,6 +7,28 @@ reconstruction after the fact.
 
 ## 2026-09-08
 
+- **Add plugin ABI-tag check: refuse to load a plugin built against a mismatched
+  toolchain/header** (`992be62`). `addon_api_i`'s virtual-interface ABI only has a
+  well-defined layout between binaries built with the same compiler, standard
+  library, and version of `api.hxx` — there was no way to detect a mismatch before
+  now; it would just corrupt memory somewhere unrelated to the actual defect. Added
+  `ADDON_API_ABI_VERSION` + `addon_api_abi_tag()` (folding in compiler id,
+  `__cplusplus`, and `_GLIBCXX_USE_CXX11_ABI`) to `api.hxx`, and an
+  `ADDON_PLUGIN_ABI_TAG()` macro plugins invoke once to export it as `abi_tag()`;
+  `plugin_handle_t` now `dlsym`s and compares this before resolving `init_plugin`,
+  refusing (and logging both tags) on any mismatch or missing export. Caught a real
+  bug in this before shipping: `addon_api_abi_tag()` must be `static`, not `inline` —
+  an `inline` (weak, default-visibility) definition in a header included by both the
+  server and every plugin gets resolved through the process's global symbol scope,
+  where the executable's own copy always wins regardless of `RTLD_LOCAL` on the
+  plugin, silently interposing the host's tag into every plugin's call to it, so the
+  check compared the host against itself no matter what the plugin was built with —
+  found via a deliberate two-plugin version-mismatch test before shipping it. Also
+  documents the requirement in `server_plugins.md`'s new "ABI compatibility" section,
+  and adds two follow-up TODOs: a future protobuf-based data boundary to actually
+  decouple plugin/server toolchain versions (this tag only fails loudly on a
+  mismatch, it doesn't remove the constraint), and the unguarded `boards_` map as a
+  latent concurrency issue.
 - **Fix shutdown-order regression: destroy `api` after `unload_plugins()`, not before**
   (`b76dbad`). The RAII `shutdown_guard_t` added earlier the same day had `api.reset()`
   running before `unload_plugins()`, but a plugin's `unload_plugin()` dereferences its
