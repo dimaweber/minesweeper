@@ -73,26 +73,30 @@ as an error and skipped — it does not abort startup.
 ## Anatomy of a plugin
 
 A plugin is a shared library exporting four `extern "C"` symbols (three metadata
-functions plus the entry point); `unload_plugin` is optional:
+functions plus the entry point) and should also export a fifth, `unload_plugin`:
 
 ```cpp
 extern "C" {
 constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
-void                  init_plugin(std::shared_ptr<addon_api_i> api_ptr);
-// optional:
+void                  init_plugin(addon_api_i& api);
 void                  unload_plugin( );
 }
 ```
 
 * `name()` / `version()` / `description()` — used only for logging.
-* `init_plugin(api_ptr)` — called once at load time. Store `api_ptr` (typically in an
-  anonymous-namespace file-local `std::shared_ptr<addon_api_i>`) and use it for
+* `init_plugin(api)` — called once at load time. Store the pointer (typically in an
+  anonymous-namespace file-local `addon_api_i*`, see both shipped plugins) and use it for
   everything else the plugin does.
 * `unload_plugin()` — called (if present, looked up via `dlsym`) when the server shuts
-  down, right before `dlclose`. Use it for any cleanup the plugin needs; none of the
-  shipped plugins currently define one.
+  down, before `dlclose`. This is not just optional cleanup: it's your only chance to
+  disconnect anything you connected to `ready_to_load_resources_signal()` (see
+  `install_resource` below) and drop your own `addon_api_i*` *before* it's dangling.
+  `main()` guarantees `api` is still alive, and every plugin's `.so` is still mapped,
+  when `unload_plugin()` runs — see "Why references and function pointers, not
+  `shared_ptr`/`std::function`" below for why this matters and what can go wrong if you
+  skip it.
 
 ### Registering resources
 
@@ -116,14 +120,15 @@ extern "C" {
 constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
-void                  init_plugin(std::shared_ptr<addon_api_i> api_ptr);
+void                  init_plugin(addon_api_i& api);
+void                  unload_plugin( );
 }
 
 namespace {
-std::shared_ptr<addon_api_i> api;
-constexpr std::string_view   rest_resource_path = "my/thing";
+addon_api_i*                api;
+constexpr std::string_view  rest_resource_path = "my/thing";
 
-void my_handler (SessionPtr session) {
+void my_handler (restbed::Session& session) {
   auto r = api->create_response(session);
   r->add_property("status", "ok");
   return r->send(restbed::OK, content_type_t::json);
@@ -138,14 +143,19 @@ constexpr const char* name ( ) { return "my_plugin"; }
 constexpr const char* version ( ) { return "1.0.0"; }
 constexpr const char* description ( ) { return "Does a thing"; }
 
-void init_plugin ([[maybe_unused]] std::shared_ptr<addon_api_i> api_ptr) {
-  api = api_ptr;
+void init_plugin ([[maybe_unused]] addon_api_i& api_iface) {
+  api = &api_iface;
   api->ready_to_load_resources_signal( ).connect(install_resource);
+}
+
+void unload_plugin ( ) {
+  api->ready_to_load_resources_signal( ).disconnect(install_resource);
+  api = nullptr;
 }
 ```
 
-Handlers have the signature `void(SessionPtr)`, same as built-in handlers — a
-`std::shared_ptr<restbed::Session>`.
+Handlers have the signature `void(restbed::Session&)`, same as built-in handlers — a
+plain reference, not a `shared_ptr`.
 
 ## The `addon_api_i` object
 
@@ -161,11 +171,14 @@ void log(log_level_t level, fmt::format_string<Args...> fmt, Args&&... args) con
 
 **Registering resources**
 ```cpp
-void add_resource(std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler);
+using rest_handler_t = void (*)(restbed::Session&);
+void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler);
 ```
-(only call this from a slot connected to `ready_to_load_resources_signal()`, see above)
+`handler` is a plain function pointer, not `std::function` — see "Why references and
+function pointers" below. (Only call `add_resource` from a slot connected to
+`ready_to_load_resources_signal()`, see above.)
 
-**Building a response** — `create_response(session)` returns a `std::shared_ptr<rest_api_response_i>`:
+**Building a response** — `create_response(session)` returns a `std::unique_ptr<rest_api_response_i>`:
 ```cpp
 rest_api_response_i& add_property(const std::string& key, parameter_t value); // chainable
 void send(int http_code, content_type_t content_type);
@@ -175,13 +188,13 @@ void send_error(int http_code, content_type_t content_type, const std::string& m
 `parameter_list_t`/`parameter_map_t`) — see the "Response format" section in
 `server_api.md` for how arrays/maps get serialized across json/yaml/xml. Use
 `request->get_query_parameter(name, default)` (a plain restbed API call on
-`session->get_request()`) to read query parameters, and
+`session.get_request()`) to read query parameters, and
 `to_content_type(request->get_query_parameter("format", "json"))` to resolve the
 requested response format the same way built-in handlers do.
 
 **Authorizing the caller**
 ```cpp
-http_api_i* http_api( ); // -> authorize_client(SessionPtr) -> result_t<client_id_t>
+http_api_i* http_api( ); // -> authorize_client(restbed::Session&) -> result_t<client_id_t>
 ```
 `result_t<T>` is `std::expected<T, std::string>`. Standard pattern, matching every
 built-in handler:
@@ -195,15 +208,34 @@ if ( !id ) {
 **Boards and clients**
 ```cpp
 size_t                     boards_count( ) const noexcept;
-board_id_t                 add_board(std::shared_ptr<board_i> board);
-void                       for_each_board(std::function<void(board_id_t, std::shared_ptr<board_i>)> func);
-std::shared_ptr<board_i>   board(board_id_t board_id);
+board_id_t                 add_board(std::unique_ptr<board_i> board);
+using board_manipulation_func_t = void (*)(void* user_data, board_id_t, board_i&);
+void                       for_each_board(board_manipulation_func_t func, void* user_data);
+board_i&                   board(board_id_t board_id);                    // throws std::out_of_range if not found
 std::optional<client_id_t> add_new_client(board_id_t board_id);
-std::shared_ptr<board_i>   board_for_client(client_id_t client_id);
-std::shared_ptr<board_i>   create_board(std::size_t width, std::size_t height, int bombs_count);
+std::optional<board_i&>    board_for_client(client_id_t client_id);
+std::unique_ptr<board_i>   create_board(std::size_t width, std::size_t height, int bombs_count);
 ```
 `board_for_client` is what you call after `authorize_client` succeeds — it's the
 per-client independent copy of the board (see `server_api.md`'s session model).
+
+`for_each_board` takes a plain callback plus an opaque `user_data` pointer instead of a
+capturing lambda (again, see "Why references and function pointers" below) — thread
+per-call context through `user_data` and cast it back inside the callback:
+```cpp
+void collect_board (void* user_data, board_id_t board_id, board_i& board) {
+  auto& boards = *static_cast<parameter_list_t*>(user_data);
+  parameter_map_t board_info;
+  board_info.emplace("board_id", board_id);
+  board_info.emplace("width", board.width( ));
+  board_info.emplace("height", board.height( ));
+  boards.emplace_back(board_info);
+}
+// ...
+parameter_list_t boards;
+api->for_each_board(collect_board, &boards);
+```
+(this is exactly how `boards_list` implements `GET /boards/list`, see below).
 
 **The board itself** — `board_i` (obtained from `board_for_client`/`board`/`create_board`):
 ```cpp
@@ -220,7 +252,7 @@ int         neighbor_bombs_count(const coord_t& coord) const;
 int         neighbor_flags_count(const coord_t& coord) const;
 int         neighbor_revealed_count(const coord_t& coord) const;
 int         neighbor_unrevealed_count(const coord_t& coord) const;
-bool        none_of_cell(std::function<bool(const cell_i&)> func) const;
+bool        none_of_cell(std::function<bool(const cell_i&)> func) const; // std::function is fine here: called synchronously, never stored
 int         reveal(const coord_t& coord);                              // reveals a single cell
 std::vector<reveal_result_t> reveal_cells(const coord_t& coord);        // auto-reveal flood-fill
 ```
@@ -268,11 +300,44 @@ const std::string&    rsa_private_key( ) const;
 const std::string&    rsa_public_key( ) const;
 ```
 
+## Why references and function pointers, not `shared_ptr`/`std::function`
+
+Every type on the `addon_api_i`/`http_api_i`/`board_i` boundary is a plain reference,
+raw pointer, or C-style function pointer (`rest_handler_t`, `board_manipulation_func_t`)
+— deliberately, not `std::shared_ptr` or `std::function`. This isn't style preference;
+plugins are loaded with `dlopen` and unloaded with `dlclose`, and `dlclose` unmaps a
+plugin's code unconditionally, with no awareness that some object elsewhere might still
+reference it.
+
+A `std::function` (or a capturing lambda passed where one is expected) is type-erased:
+its "manager" code — the thunk that knows how to call, copy, and destroy the wrapped
+callable — is compiled into whichever translation unit instantiates it, which for a
+plugin-supplied callback means *inside the plugin's `.so`*. If that `std::function`
+object outlives `dlclose()`-ing the plugin — because it ended up stored in something
+the main app owns for longer, e.g. a registered REST resource or a signal connection —
+destroying or invoking it later jumps into unmapped memory. Likewise a
+`shared_ptr<addon_api_i>` handed to a plugin creates a second owner of the server's
+`addon_api_t`: if a plugin never releases its copy, the object can end up being destroyed
+from *inside* some other plugin's `dlclose`, after the first plugin's code is already
+gone but before the object holding a connection into it is.
+
+A plain function pointer has none of this: it's just an address, with no manager code
+generated anywhere, so it stays valid as data as long as you don't call through it after
+the pointee is unmapped. That's why `unload_plugin()` matters — it's your one guaranteed
+window (while `api` and every plugin's `.so`, including your own, are still mapped) to
+disconnect from `ready_to_load_resources_signal()` and drop your `addon_api_i*`, so that
+nothing plugin-side survives to be touched after any `.so` is closed. `main()` on its
+side destroys `service` and calls `unload_plugin()` on every plugin *before* dlclosing
+any of them, and only destroys `api` itself afterwards — see `shutdown_guard_t` in
+`src/server/server.cxx` for the exact ordering and why it's structured as an RAII guard
+rather than cleanup code at the end of `main()` (every early-return path, including an
+exception from a failed `bind()`, needs the same ordering guarantee).
+
 ## Shipped examples
 
 * **`boards_list`** (`src/server/plugins/boards_list.cxx`) — `GET /boards/list`. The
-  simplest possible plugin: no auth, iterates `for_each_board` and reports
-  `board_id`/`width`/`height` for each.
+  simplest possible plugin: no auth, iterates `for_each_board` (via the
+  callback+`user_data` pattern above) and reports `board_id`/`width`/`height` for each.
 * **`cell_check`** (`src/server/plugins/cell_check.cxx`) — `POST /cell/check`. Full
   example of an authenticated, parameterized handler that reads `x`/`y` query params,
   authorizes the caller, validates board/cell state, and calls `board->reveal_cells(...)`
@@ -286,8 +351,12 @@ Both are fully documented from the client's perspective in `server_api.md`.
   `handlers.hxx`, `http_auth.hxx`, or `api_impl.hxx`. If something a plugin needs isn't
   exposed on `addon_api_i`/`http_api_i`/`board_i`/`cell_i`, that's a gap in those
   interfaces to fix, not a reason to link against server internals.
-* Keep a plugin's own `std::shared_ptr<addon_api_i>` in an anonymous namespace, matching
-  both shipped plugins.
+* Keep a plugin's own `addon_api_i*` in an anonymous namespace, matching both shipped
+  plugins — never `std::shared_ptr<addon_api_i>` (see above for why).
+* Always define `unload_plugin()`, disconnecting anything you connected to
+  `ready_to_load_resources_signal()` and then nulling your `addon_api_i*`, matching both
+  shipped plugins. Skipping it leaves a live connection into your `.so` for `api`'s
+  signal to hold past your own `dlclose`.
 * Prefer lowercase error messages (`"can't reveal flagged cell"`) to match the built-in
   handlers' style — `cell_check` uses capitalized messages (`"Cell is not revealed"`),
   which is an inconsistency in the current codebase, not something to imitate.
