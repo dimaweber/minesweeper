@@ -9,8 +9,8 @@
 
 extern std::shared_ptr<addon_api_i> api;
 
-void session_new_handler (SessionPtr session) {
-  const auto        request      = session->get_request( );
+void session_new_handler (restbed::Session& session) {
+  const auto        request      = session.get_request( );
   const std::string format_str   = request->get_query_parameter("format", "json");
   const std::string board_id_str = request->get_query_parameter("board_id", "");
 
@@ -47,8 +47,8 @@ void session_new_handler (SessionPtr session) {
   return r->send(restbed::OK, content_type);
 }
 
-void board_size_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void board_size_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
   const content_type_t content_type = to_content_type(format);
@@ -60,19 +60,23 @@ void board_size_handler (SessionPtr session) {
     return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const std::shared_ptr<board_i> board = api->board_for_client(*id);
-  if ( !board ) {
+  try {
+    const auto board = api->board_for_client(*id);
+    if ( !board ) {
+      return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
+    }
+
+    SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, board->width( ), board->height( ));
+
+    r->add_property("width", board->width( )).add_property("height", board->height( ));
+    return r->send(restbed::OK, content_type);
+  } catch ( std::out_of_range& e ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
-
-  SPDLOG_DEBUG("Size request for client {}: {}x{}", *id, board->width( ), board->height( ));
-
-  r->add_property("width", board->width( )).add_property("height", board->height( ));
-  return r->send(restbed::OK, content_type);
 }
 
-void board_bombs_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void board_bombs_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
   const content_type_t content_type = to_content_type(format);
@@ -84,7 +88,7 @@ void board_bombs_handler (SessionPtr session) {
     return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const std::shared_ptr<board_i> board = api->board_for_client(*id);
+  const auto board = api->board_for_client(*id);
   if ( !board ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
@@ -95,8 +99,8 @@ void board_bombs_handler (SessionPtr session) {
   return r->send(restbed::OK, content_type);
 }
 
-void board_fully_revealed_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void board_fully_revealed_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
   const content_type_t content_type = to_content_type(format);
@@ -108,19 +112,23 @@ void board_fully_revealed_handler (SessionPtr session) {
     return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const std::shared_ptr<board_i> board = api->board_for_client(*id);
-  if ( !board ) {
+  try {
+    const auto board = api->board_for_client(*id);
+    if ( !board ) {
+      return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
+    }
+
+    SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, board->unrevealed_count( ));
+
+    r->add_property("fully_revealed", board->unrevealed_count( ) == board->bombs_total( ) && board->flags_count( ) == board->bombs_total( ));
+    return r->send(restbed::OK, content_type);
+  } catch ( const std::out_of_range& e ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
-
-  SPDLOG_DEBUG("Fully revealed request for client {}: {} unrevealed cells", *id, board->unrevealed_count( ));
-
-  r->add_property("fully_revealed", board->unrevealed_count( ) == board->bombs_total( ) && board->flags_count( ) == board->bombs_total( ));
-  return r->send(restbed::OK, content_type);
 }
 
-void cell_reveal_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void cell_reveal_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const int         x       = request->get_query_parameter<int>("x", -1);
   const int         y       = request->get_query_parameter<int>("y", -1);
   const std::string format  = request->get_query_parameter("format", "json");
@@ -134,7 +142,7 @@ void cell_reveal_handler (SessionPtr session) {
     return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  const std::shared_ptr<board_i> board = api->board_for_client(*id);
+  auto board = api->board_for_client(*id);
   if ( !board ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
@@ -192,8 +200,8 @@ void cell_reveal_handler (SessionPtr session) {
   }
 }
 
-void cell_flag_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void cell_flag_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const std::string x_str   = request->get_query_parameter("x", "");
   const std::string y_str   = request->get_query_parameter("y", "");
   const std::string format  = request->get_query_parameter("format", "json");
@@ -211,7 +219,7 @@ void cell_flag_handler (SessionPtr session) {
     return r->send_error(restbed::BAD_REQUEST, content_type, "missing mandatory parameter x or y");
   }
 
-  const std::shared_ptr<board_i> board = api->board_for_client(*id);
+  const auto board = api->board_for_client(*id);
   if ( !board ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }
@@ -250,8 +258,8 @@ void cell_flag_handler (SessionPtr session) {
   return r->send(restbed::OK, content_type);
 }
 
-void board_check_handler (SessionPtr session) {
-  const auto        request = session->get_request( );
+void board_check_handler (restbed::Session& session) {
+  const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
   const auto content_type = to_content_type(format);
@@ -263,8 +271,7 @@ void board_check_handler (SessionPtr session) {
     return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
   }
 
-  std::shared_ptr<board_i> board = api->board_for_client(*id);
-
+  auto board = api->board_for_client(*id);
   if ( !board ) {
     return r->send_error(restbed::FORBIDDEN, content_type, "client not found");
   }

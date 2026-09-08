@@ -19,23 +19,23 @@
   #include <sigslot/signal.hpp>
 #endif
 
-template<size_t dimention = 2>
-  requires(dimention > 0)
+template<size_t dimension = 2>
+  requires(dimension > 0)
 struct m_coord_t {
-
   m_coord_t ( ) {
     std::fill(vec.begin( ), vec.end( ), -1);
   }
 
-  m_coord_t(const m_coord_t& other) = default;
-  m_coord_t(m_coord_t&& other) noexcept = default;
-  m_coord_t& operator=(const m_coord_t& other) = default;
-  m_coord_t& operator=(m_coord_t&& other) noexcept = default;
+  m_coord_t(const m_coord_t& other)                 = default;
+  m_coord_t(m_coord_t&& other) noexcept             = default;
+  m_coord_t& operator= (const m_coord_t& other)     = default;
+  m_coord_t& operator= (m_coord_t&& other) noexcept = default;
 
-  [[nodiscard]] constexpr bool operator==(const m_coord_t& other) const noexcept {
+  [[nodiscard]] constexpr bool operator== (const m_coord_t& other) const noexcept {
     return std::ranges::equal(vec, other.vec);
   }
-  [[nodiscard]] constexpr std::strong_ordering operator<=>(const m_coord_t& other) const noexcept {
+
+  [[nodiscard]] constexpr std::strong_ordering operator<=> (const m_coord_t& other) const noexcept {
     if ( *this == other ) {
       return std::strong_ordering::equal;
     }
@@ -44,7 +44,7 @@ struct m_coord_t {
 
   template<typename... Args>
   m_coord_t(Args... args)
-    requires(sizeof...(args) == dimention)
+    requires(sizeof...(args) == dimension) && (std::is_convertible_v<Args, int> && ...)
       : vec {args...} {
   }
 
@@ -56,7 +56,7 @@ struct m_coord_t {
     return std::ranges::all_of(vec, [] (int v) { return v > 0; });
   }
 
-  std::string dim_name (int i) const noexcept{
+  std::string dim_name (int i) const noexcept {
     switch ( i ) {
       case 0:  return "x";
       case 1:  return "y";
@@ -69,43 +69,43 @@ struct m_coord_t {
   }
 
   [[nodiscard]] int x ( ) const noexcept
-    requires(dimention > 0)
+    requires(dimension > 0)
   {
     return vec[0];
   }
 
   [[nodiscard]] int y ( ) const noexcept
-    requires(dimention > 1)
+    requires(dimension > 1)
   {
     return vec[1];
   }
 
   [[nodiscard]] int z ( ) const noexcept
-    requires(dimention > 2)
+    requires(dimension > 2)
   {
     return vec[2];
   }
 
   [[nodiscard]] int i ( ) const noexcept
-    requires(dimention > 3)
+    requires(dimension > 3)
   {
     return vec[3];
   }
 
   [[nodiscard]] int j ( ) const noexcept
-    requires(dimention > 4)
+    requires(dimension > 4)
   {
     return vec[4];
   }
 
   [[nodiscard]] int k ( ) const noexcept
-    requires(dimention > 5)
+    requires(dimension > 5)
   {
     return vec[5];
   }
 
   [[nodiscard]] consteval size_t rank ( ) const noexcept {
-    return dimention;
+    return dimension;
   }
 
   [[nodiscard]]
@@ -114,7 +114,7 @@ struct m_coord_t {
   }
 
 private:
-  std::array<int, dimention> vec { };
+  std::array<int, dimension> vec { };
 };
 
 using coord_t = m_coord_t<2>;
@@ -122,18 +122,18 @@ using coord_t = m_coord_t<2>;
 FMT_BEGIN_NAMESPACE
 
 template<typename T, size_t n>
-[[nodiscard]] constexpr  T to_string(const m_coord_t<n>& coord) {
-  return T{coord.to_string()};
+[[nodiscard]] constexpr T to_string (const m_coord_t<n>& coord) {
+  return T {coord.to_string( )};
 }
 
-template<size_t dimention>
-struct formatter<m_coord_t<dimention>> : formatter<std::string> {
+template<size_t dimension>
+struct formatter<m_coord_t<dimension>> : formatter<std::string> {
   template<typename FormatContext>
-  auto format (const m_coord_t<dimention>& coord, FormatContext& ctx) const {
+  auto format (const m_coord_t<dimension>& coord, FormatContext& ctx) const {
     if ( !coord ) {
       return formatter<std::string>::format("nullopt", ctx);
     }
-    return formatter<std::string>::format(coord.to_string(), ctx);
+    return formatter<std::string>::format(coord.to_string( ), ctx);
   }
 };
 
@@ -267,14 +267,16 @@ using result_t = std::expected<T, std::string>;
 struct http_api_i {
   virtual ~http_api_i( ) = default;
 
-  virtual result_t<client_id_t> authorize_client(SessionPtr session) const = 0;
+  virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
 };
 
 struct addon_api_i {
+  using rest_handler_t = void (*)(restbed::Session&);
+
   struct resource_t {
-    const std::string                     path;
-    const http_methods_t                  method;
-    const std::function<void(SessionPtr)> handler;
+    const std::string    path;
+    const http_methods_t method;
+    const rest_handler_t handler;
   };
 
   enum log_level_t { trace, debug, info, warn, error, critical };
@@ -288,7 +290,7 @@ struct addon_api_i {
     log(level, fmt::format(fmt, std::forward<Args>(args)...));
   }
 
-  virtual void add_resource(std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) = 0;
+  virtual void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) = 0;
 
   void add_resource (const resource_t& resource) {
     add_resource(resource.path, resource.method, resource.handler);
@@ -307,16 +309,23 @@ struct addon_api_i {
   [[nodiscard]] virtual const std::string& rsa_private_key( ) const = 0;
   [[nodiscard]] virtual const std::string& rsa_public_key( ) const  = 0;
 
-  [[nodiscard]] virtual size_t     boards_count( ) const noexcept                                                 = 0;
-  virtual board_id_t               add_board(std::shared_ptr<board_i> board)                                      = 0;
-  virtual void                     for_each_board(std::function<void(board_id_t, std::shared_ptr<board_i>)> func) = 0;
-  virtual std::shared_ptr<board_i> board(board_id_t board_id)                                                     = 0;
+  [[nodiscard]] virtual size_t boards_count( ) const noexcept     = 0;
+  virtual board_id_t           add_board(std::unique_ptr<board_i> board)          = 0;
+  // Plain C-style callback + opaque user_data, deliberately not std::function
+  // or a capturing lambda: those cross the plugin/app ABI boundary as
+  // type-erased objects whose manager/invoker code is compiled wherever the
+  // callable is instantiated (i.e. inside the plugin's .so). If such an
+  // object outlives dlclose()-ing that plugin, destroying or invoking it
+  // jumps into unmapped memory. user_data carries per-call context instead.
+  using board_manipulation_func_t                                              = void (*)(void* user_data, board_id_t, board_i&);
+  virtual void     for_each_board(board_manipulation_func_t func, void* user_data) = 0;
+  virtual board_i& board(board_id_t board_id)                     = 0;
 
   virtual std::optional<client_id_t> add_new_client(board_id_t board_id)     = 0;
-  virtual std::shared_ptr<board_i>   board_for_client(client_id_t client_id) = 0;
+  virtual std::optional<board_i&>                   board_for_client(client_id_t client_id) = 0;
 
-  virtual std::shared_ptr<rest_api_response_i> create_response(SessionPtr session)                                  = 0;
-  virtual std::shared_ptr<board_i>             create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
+  virtual std::unique_ptr<rest_api_response_i> create_response(restbed::Session& session)                           = 0;
+  virtual std::unique_ptr<board_i>                             create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
 
   virtual void install_entrypoints(restbed::Service& service) = 0;
 

@@ -16,8 +16,8 @@ namespace {
 const std::string issuer {"minesweeper"};
 const char*       client_id_claim = {"client_id"};
 
-result_t<std::string> get_jwt_from_request (SessionPtr session) {
-  const auto        request   = session->get_request( );
+result_t<std::string> get_jwt_from_request (restbed::Session& session) {
+  const auto        request   = session.get_request( );
   const std::string token_str = request->get_header("Authorization", "");
 
   if ( token_str.empty( ) || !token_str.starts_with("Bearer ") ) {
@@ -63,7 +63,7 @@ result_t<int> get_id_from_jwt (const std::string& token) {
   }
 }
 
-result_t<client_id_t> authorize_client (SessionPtr session) {
+result_t<client_id_t> authorize_client (restbed::Session& session) {
   const auto token = get_jwt_from_request(session);
   if ( !token ) {
     return std::unexpected(token.error( ));

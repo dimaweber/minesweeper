@@ -9,19 +9,30 @@
 #include "api.hxx"
 
 extern "C" {
-constexpr const char* name( );
-constexpr const char* version( );
-constexpr const char* description( );
-void                  init_plugin(std::shared_ptr<addon_api_i> api_ptr);
+const char* name( );
+const char* version( );
+const char* description( );
+void                  init_plugin(addon_api_i& api);
+void                  unload_plugin( );
 }
 
 namespace {
-std::shared_ptr<addon_api_i> api;
+addon_api_i* api;
 constexpr std::string_view   rest_resource_path = "boards/list";
 
-void boards_list_handler (SessionPtr session) {
+void collect_board (void* user_data, board_id_t board_id, board_i& board) {
+  auto& boards = *static_cast<parameter_list_t*>(user_data);
+
+  parameter_map_t board_info;
+  board_info.emplace("board_id", board_id);
+  board_info.emplace("width", board.width( ));
+  board_info.emplace("height", board.height( ));
+  boards.emplace_back(board_info);
+}
+
+void boards_list_handler (restbed::Session& session) {
   api->log(addon_api_i::log_level_t::debug, "boards_list_handler called");
-  const auto        request = session->get_request( );
+  const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
   const content_type_t content_type = to_content_type(format);
@@ -29,13 +40,7 @@ void boards_list_handler (SessionPtr session) {
   auto r= api->create_response(session);
 
   parameter_list_t boards;
-  api->for_each_board([&boards] (board_id_t board_id, std::shared_ptr<board_i> board) {
-    parameter_map_t board_info;
-    board_info.emplace("board_id", board_id);
-    board_info.emplace("width", board->width());
-    board_info.emplace("height", board->height());
-    boards.emplace_back(board_info);
-  });
+  api->for_each_board(collect_board, &boards);
 
   r->add_property("boards", boards);
   return r->send(restbed::OK, content_type);
@@ -47,22 +52,26 @@ void install_resource ( ) {
 }
 }  // namespace
 
-constexpr const char* name ( ) {
+const char* name ( ) {
   return "boards_list";
 }
 
-constexpr const char* version ( ) {
+const char* version ( ) {
   return "1.0.0";
 }
 
-constexpr const char* description ( ) {
+const char* description ( ) {
   return "Provides a REST API endpoint to list all available boards";
 }
 
-void init_plugin ([[maybe_unused]] std::shared_ptr<addon_api_i> api_ptr) {
-  api = api_ptr;
+void init_plugin ([[maybe_unused]] addon_api_i& api_iface) {
 
+  api = &api_iface;
   api->log(addon_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
 
   api->ready_to_load_resources_signal( ).connect(install_resource);
+}
+
+void unload_plugin ( ) {
+  api = nullptr;
 }

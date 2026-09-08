@@ -10,9 +10,8 @@ struct client_context_t {
   std::shared_ptr<board_i> board_;
 };
 
-
 struct clients_t {
-  auto add(client_id_t id, board_id_t board_id, std::shared_ptr<board_i> board);
+  auto add(client_id_t id, board_id_t board_id, board_i& board);
   auto find(client_id_t id);
   auto end( );
   auto begin( );
@@ -22,10 +21,9 @@ private:
   std::unordered_map<client_id_t, client_context_t> data_;
 };
 
-
 class response_t : public rest_api_response_i {
 public:
-  explicit response_t(SessionPtr session);
+  explicit response_t(restbed::Session& session);
 
   rest_api_response_i& add_property(const std::string& key, parameter_t value) override;
 
@@ -41,16 +39,16 @@ protected:
   }
 
 private:
-  SessionPtr      session_;
-  parameter_map_t parameters_;
-  headers_t       headers_;
+  restbed::Session& session_;
+  parameter_map_t   parameters_;
+  headers_t         headers_;
 
   std::string                       response_body(content_type_t content_type, const parameter_map_t& m);
   std::pair<std::string, headers_t> body(content_type_t content_type);
 };
 
 struct http_api_t : public http_api_i {
-  result_t<client_id_t> authorize_client (SessionPtr session) const override {
+  result_t<client_id_t> authorize_client (restbed::Session& session) const override {
     return http::auth::authorize_client(session);
   }
 };
@@ -98,7 +96,7 @@ struct addon_api_t : public addon_api_i {
     return rsa_public_key_;
   }
 
-  void add_resource(std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) override;
+  void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) override;
 
   addon_api_t( );
 
@@ -106,24 +104,24 @@ struct addon_api_t : public addon_api_i {
     return boards_.size( );
   }
 
-  board_id_t add_board (std::shared_ptr<board_i> board) override {
+  board_id_t add_board (std::unique_ptr<board_i> board) override {
     const board_id_t board_id = boards_count( ) + 1;
     boards_.emplace(board_id, std::move(board));
     return board_id;
   }
 
-  void for_each_board (std::function<void(board_id_t, std::shared_ptr<board_i>)> func) override {
+  void for_each_board (board_manipulation_func_t func, void* user_data) override {
     for ( auto& [board_id, board]: boards_ ) {
-      func(board_id, board);
+      func(user_data, board_id, *board);
     }
   }
 
-  std::shared_ptr<board_i> board (board_id_t board_id) override {
-    return boards_.at(board_id);
+  board_i& board (board_id_t board_id) override {
+    return *boards_.at(board_id);
   }
 
   std::optional<client_id_t> add_new_client(board_id_t board_id) override;
-  std::shared_ptr<board_i>   board_for_client(client_id_t client_id) override;
+  std::optional<board_i&> board_for_client(client_id_t client_id) override;
 
   sigslot::signal<>& ready_to_load_resources_signal ( ) override {
     return ready_to_load_resources_signal_;
@@ -140,23 +138,23 @@ struct addon_api_t : public addon_api_i {
     for ( const auto& [path, method, handler]: resources_ ) {
       const auto resource = std::make_shared<restbed::Resource>( );
       resource->set_path(path);
-      resource->set_method_handler(to_string<const char*>(method), handler);
+      resource->set_method_handler(to_string<const char*>(method), [handler] (SessionPtr session) { return handler(*session); });
       service.publish(resource);
     }
   }
 
-  std::shared_ptr<rest_api_response_i> create_response (SessionPtr session) override {
-    return std::make_shared<response_t>(session);
+  std::unique_ptr<rest_api_response_i> create_response (restbed::Session& session) override {
+    return std::make_unique<response_t>(session);
   }
 
-  std::shared_ptr<board_i> create_board (std::size_t width, std::size_t height, int bombs_count) override;
+  std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) override;
 
   http_api_i* http_api ( ) override {
     return &http_api_;
   }
 
 private:
-  using board_map_t = std::unordered_map<board_id_t, std::shared_ptr<board_i>>;
+  using board_map_t = std::unordered_map<board_id_t, std::unique_ptr<board_i>>;
   clients_t                clients_;
   board_map_t              boards_;
   http_api_t               http_api_;

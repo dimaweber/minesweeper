@@ -4,10 +4,12 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <asio/signal_set.hpp>
 #include <CLI/CLI.hpp>
 #include <corvusoft/restbed/request.hpp>
 #include <corvusoft/restbed/service.hpp>
 #include <corvusoft/restbed/settings.hpp>
+#include <csignal>
 #include <cstdarg>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <restbed>
 #include <string>
+#include <thread>
 
 #include "api_impl.hxx"
 #include "handlers.hxx"
@@ -65,10 +68,10 @@ public:
     va_list args;
     va_start(args, format);
     std::array<char, 1024> message;
-    ::vsnprintf(message.data(), message.size(), format, args);
+    ::vsnprintf(message.data( ), message.size( ), format, args);
     va_end(args);
 
-    logger->log(convert_level(level), "{}", message.data());
+    logger->log(convert_level(level), "{}", message.data( ));
   }
 
   void log_if (bool expr, const Level level, const char* format, ...) override {
@@ -77,13 +80,11 @@ public:
     va_list args;
     va_start(args, format);
     std::array<char, 1024> message;
-    ::vsnprintf(message.data(), message.size(), format, args);
+    ::vsnprintf(message.data( ), message.size( ), format, args);
     va_end(args);
-    logger->log(convert_level(level), "{}", message.data());
+    logger->log(convert_level(level), "{}", message.data( ));
   }
 };
-
-std::vector<void*> plugin_handles;
 
 namespace {
 [[nodiscard]]
@@ -95,6 +96,124 @@ consteval bool server_support_plugins ( ) noexcept {
 #endif
 }
 
+struct plugin_handle_t {
+  using init_func_t        = void (*)(addon_api_i&);
+  using name_func_t        = const char* (*)( );
+  using version_func_t     = const char* (*)( );
+  using description_func_t = const char* (*)( );
+  using unload_func_t      = void (*)( );
+
+  void*                 handle_ {nullptr};
+  init_func_t           init_func_ {nullptr};
+  unload_func_t         unload_func_ {nullptr};
+  name_func_t           name_func_ {nullptr};
+  version_func_t        version_func_ {nullptr};
+  description_func_t    description_func_ {nullptr};
+  std::filesystem::path path_;
+
+  plugin_handle_t (const std::filesystem::path& libbath) {
+    handle_ = ::dlopen(libbath.c_str( ), RTLD_LAZY | RTLD_LOCAL);
+    if ( !handle_ ) {
+      SPDLOG_ERROR("Failed to load plugin {}: {}", libbath, ::dlerror( ));
+      return;
+    }
+    init_func_        = reinterpret_cast<init_func_t>(::dlsym(handle_, "init_plugin"));
+    unload_func_      = reinterpret_cast<unload_func_t>(::dlsym(handle_, "unload_plugin"));
+    name_func_        = reinterpret_cast<name_func_t>(::dlsym(handle_, "name"));
+    version_func_     = reinterpret_cast<version_func_t>(::dlsym(handle_, "version"));
+    description_func_ = reinterpret_cast<description_func_t>(::dlsym(handle_, "description"));
+  }
+
+  ~plugin_handle_t ( ) {
+    close( );
+  }
+
+  plugin_handle_t(const plugin_handle_t&)             = delete;
+  plugin_handle_t& operator= (const plugin_handle_t&) = delete;
+
+  plugin_handle_t (plugin_handle_t&& other) noexcept :
+      handle_(other.handle_),
+      init_func_(other.init_func_),
+      unload_func_(other.unload_func_),
+      name_func_(other.name_func_),
+      version_func_(other.version_func_),
+      description_func_(other.description_func_),
+      path_(std::move(other.path_)) {
+    other.handle_           = nullptr;
+    other.init_func_        = nullptr;
+    other.unload_func_      = nullptr;
+    other.name_func_        = nullptr;
+    other.version_func_     = nullptr;
+    other.description_func_ = nullptr;
+  }
+
+  plugin_handle_t& operator= (plugin_handle_t&& other) noexcept {
+    if ( this != &other ) {
+      close( );
+      handle_           = other.handle_;
+      init_func_        = other.init_func_;
+      unload_func_      = other.unload_func_;
+      name_func_        = other.name_func_;
+      version_func_     = other.version_func_;
+      description_func_ = other.description_func_;
+      path_             = std::move(other.path_);
+
+      other.handle_           = nullptr;
+      other.init_func_        = nullptr;
+      other.unload_func_      = nullptr;
+      other.name_func_        = nullptr;
+      other.version_func_     = nullptr;
+      other.description_func_ = nullptr;
+    }
+    return *this;
+  }
+
+  [[nodiscard]] operator bool ( ) const noexcept {
+    return handle_ != nullptr && init_func_ != nullptr;
+  }
+
+  void init (std::shared_ptr<addon_api_i> api) const {
+    if ( init_func_ ) {
+      init_func_(*api);
+    }
+  }
+
+  [[nodiscard]] const char* name ( ) const noexcept {
+    return name_func_ ? name_func_( ) : "unknown";
+  }
+
+  void unload ( ) const {
+    if ( unload_func_ ) {
+      unload_func_( );
+    }
+  }
+
+  [[nodiscard]] const char* version ( ) const noexcept {
+    return version_func_ ? version_func_( ) : "unknown";
+  }
+
+  [[nodiscard]] const char* description ( ) const noexcept {
+    return description_func_ ? description_func_( ) : "unknown";
+  }
+
+  int close ( ) {
+    if ( handle_ ) {
+      const int ret     = ::dlclose(handle_);
+      handle_           = nullptr;
+      name_func_        = nullptr;
+      version_func_     = nullptr;
+      init_func_        = nullptr;
+      unload_func_      = nullptr;
+      description_func_ = nullptr;
+      version_func_     = nullptr;
+      return ret;
+    }
+    return 0;
+  }
+};
+
+std::unordered_map<std::string, plugin_handle_t> plugins;
+
 bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_i> api) {
   if constexpr ( !server_support_plugins( ) )
     return false;
@@ -102,27 +221,25 @@ bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<add
   SPDLOG_INFO("Loading plugins from {}", plugins_dir);
   try {
     for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
-      if ( entry.is_regular_file( ) && entry.path( ).extension( ) == ".so" ) {
-        SPDLOG_INFO("Loading plugin {}", entry.path( ));
-        void* handle = ::dlopen(entry.path( ).c_str( ), RTLD_LAZY | RTLD_LOCAL);
-        if ( !handle ) {
+      const auto path = entry.path( );
+      if ( entry.is_regular_file( ) && path.extension( ) == ".so" ) {
+        SPDLOG_INFO("Loading plugin {}", path);
+        const auto [it, ok] = plugins.emplace(path, plugin_handle_t(path));
+        if ( !ok ) {
+          SPDLOG_WARN("Plugin {} already loaded, skipping", path);
+          continue;
+        }
+        auto& rec = it->second;
+        if ( !rec ) {
           SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
           continue;
         }
-        using init_func_t     = void (*)(std::shared_ptr<addon_api_i>);
-        init_func_t init_func = reinterpret_cast<init_func_t>(::dlsym(handle, "init_plugin"));
-        if ( !init_func ) {
-          SPDLOG_ERROR("Failed to find init_plugin in {}: {}", entry.path( ), ::dlerror( ));
-          ::dlclose(handle);
-          continue;
-        }
-        init_func(api);
-        plugin_handles.push_back(handle);
-        SPDLOG_INFO("Plugin {} loaded successfully", entry.path( ));
+        rec.init(api);
+        SPDLOG_INFO("Plugin {} loaded successfully: {}", rec.name( ), rec.description( ));
       }
     }
     return true;
-  }catch (const std::filesystem::filesystem_error& e) {
+  } catch ( const std::filesystem::filesystem_error& e ) {
     SPDLOG_ERROR("Failed to load plugins from {}: {}", plugins_dir, e.what( ));
     return false;
   }
@@ -133,17 +250,13 @@ void unload_plugins ( ) {
     return;
 
   SPDLOG_INFO("Unloading plugins");
-  for ( void* handle: plugin_handles ) {
-    if ( handle ) {
-      using unload_func_t       = void (*)( );
-      unload_func_t unload_func = reinterpret_cast<unload_func_t>(::dlsym(handle, "unload_plugin"));
-      if ( unload_func ) {
-        unload_func( );
-      }
-      ::dlclose(handle);
-    }
+  for ( auto& [name, rec]: plugins ) {
+    SPDLOG_DEBUG("Unloading plugin {} handle {}", name, fmt::ptr(rec.handle_));
+    rec.unload( );
   }
-  plugin_handles.clear( );
+
+  plugins.clear( );
+  SPDLOG_DEBUG("All plugins unloaded");
 }
 }  // namespace
 
@@ -159,6 +272,7 @@ int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
 
   SPDLOG_DEBUG("Starting minesweeper server");
+
   api = std::make_shared<addon_api_t>( );
 
   CLI::App app("Server for minesweeper");
@@ -235,8 +349,10 @@ int main (int argc, const char* argv[]) {
   }
 
   for ( int i = 0; i < 10; ++i ) {
-    const auto p = api->create_board(10, 10, 10);
-    api->add_board(p);
+    auto p = api->create_board(10, 10, 10);
+    if (p) {
+      api->add_board(std::move(p));
+    }
   }
 
   const auto settings = std::make_shared<restbed::Settings>( );
@@ -254,8 +370,28 @@ int main (int argc, const char* argv[]) {
     settings->set_ssl_settings(ssl_settings);
   }
 
-  restbed::Service service;
-  service.set_logger(std::make_shared<rb_log>( ));
+  std::shared_ptr<restbed::Service> service = std::make_shared<restbed::Service>( );
+  service->set_logger(std::make_shared<rb_log>( ));
+  service->set_ready_handler([&] (restbed::Service&) { SPDLOG_INFO("Server is ready to accept connections"); });
+
+  auto&            io = service->get_io_context( );
+  asio::signal_set signals(*io, SIGINT, SIGTERM);
+  std::thread      stop_thread;
+  signals.async_wait([&service, &stop_thread] (const std::error_code& error, int signal_number) {
+    if ( !error ) {
+      SPDLOG_INFO("Received signal {}, stopping server", signal_number);
+      // Service::stop() blocks and, internally, resets and re-runs the
+      // io_context to drain it. This handler executes ON one of the
+      // io_context's own worker threads (nested inside that thread's
+      // outer run() call), and asio requires that no run()/reset() be
+      // invoked while another run() for the same io_context is still
+      // active on the stack. Run stop() on a dedicated thread instead,
+      // joined below, so the drain never happens reentrantly.
+      stop_thread = std::thread([&service] { service->stop( ); });
+    } else {
+      SPDLOG_ERROR("Signal handling error: {}", error.message( ));
+    }
+  });
 
   std::vector<addon_api_i::resource_t> entrypoints {
       {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
@@ -270,7 +406,7 @@ int main (int argc, const char* argv[]) {
     api->add_resource(resource);
   }
 
-  api->install_entrypoints(service);
+  api->install_entrypoints(*service);
 
   if ( !no_http ) {
     SPDLOG_INFO("Listening on port {} for HTTP", port);
@@ -279,11 +415,24 @@ int main (int argc, const char* argv[]) {
     SPDLOG_INFO("Listening on port {} for HTTPS", ssl_port);
   }
   try {
-    service.start(settings);
+    service->start(settings);
   } catch ( std::system_error& e ) {
     SPDLOG_ERROR("Failed to start server: {}", e.what( ));
     return EXIT_FAILURE;
   }
+
+  if ( stop_thread.joinable( ) ) {
+    stop_thread.join( );
+  }
+
+  // Destroy everything that may hold type-erased callbacks (std::function,
+  // sigslot connections) whose manager/invoker code lives inside a plugin
+  // .so *before* unload_plugins() dlcloses it below. dlclose() unmaps the
+  // plugin's code unconditionally, regardless of whether some object
+  // elsewhere still points into it; destroying those objects later would
+  // jump into unmapped memory.
+  service.reset( );
+  api.reset( );
 
   unload_plugins( );
 

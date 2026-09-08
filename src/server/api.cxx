@@ -7,6 +7,8 @@
   #include <tinyxml2.h>
 #endif
 
+#include <openssl/x509v3.h>
+
 #include <corvusoft/restbed/session.hpp>
 #include <deque>
 #include <functional>
@@ -36,7 +38,7 @@ struct parameter_serializer_t {
   static std::string serialize(content_type_t content_type, const parameter_map_t& m);
 };
 
-struct cell_t : public cell_i {
+struct [[maybe_unused]] cell_t : public cell_i {
   cell_t( ) = default;
 
   [[nodiscard]] bool is_boom ( ) const override {
@@ -64,22 +66,21 @@ struct cell_t : public cell_i {
   }
 
   int neighbor_bombs_count ( ) const override {
-    if ( count_set_ )
+    if ( count_ < 9 )
       return count_;
     return -1;
   }
 
   void set_neighbor_bombs_count (int count) override {
-    count_     = count;
-    count_set_ = true;
+    count_ = count;
   }
 
 private:
-  bool         bomb_      : 1 {false};
-  bool         flag_      : 1 {false};
-  bool         revealed_  : 1 {false};
-  bool         count_set_ : 1 {false};
-  unsigned int count_     : 3 {0};
+  [[maybe_unused]] bool reserved  : 1 {false};
+  bool                  bomb_     : 1 {false};
+  bool                  flag_     : 1 {false};
+  bool                  revealed_ : 1 {false};
+  unsigned int          count_    : 4 {0xf};
 };
 
 struct cell_ext_t : public cell_i {
@@ -217,9 +218,9 @@ size_t board_t::coord_to_index (coord_t coord) const {
   return (coord[1] - 1) * width( ) + (coord[0] - 1);
 }
 
-auto clients_t::add (client_id_t id, board_id_t board_id, std::shared_ptr<board_i> board) {
+auto clients_t::add (client_id_t id, board_id_t board_id, board_i& board) {
   const std::lock_guard lock {access_};
-  return data_.emplace(id, client_context_t {.board_id_ = board_id, .board_ = board->clone( )});
+  return data_.emplace(id, client_context_t {.board_id_ = board_id, .board_ = board.clone( )});
 }
 
 auto clients_t::find (client_id_t id) {
@@ -391,24 +392,23 @@ std::optional<client_id_t> addon_api_t::add_new_client (board_id_t board_id) {
     }
     SPDLOG_DEBUG("Created new client with id {}", it->first);
     return id;
-  }
-  catch ( const std::out_of_range& e ) {
+  } catch ( const std::out_of_range& e ) {
     SPDLOG_ERROR("Failed to add new client - board_id {} does not exist: {}", board_id, e.what( ));
     return std::nullopt;
   }
 }
 
-std::shared_ptr<board_i> addon_api_t::board_for_client (client_id_t client_id) {
+std::optional<board_i&> addon_api_t::board_for_client (client_id_t client_id) {
   if ( const auto it = clients_.find(client_id); it != clients_.end( ) ) {
-    return it->second.board_;
+    return *it->second.board_;
   }
-  return nullptr;
+  return std::nullopt;
 }
 
-std::shared_ptr<board_i> addon_api_t::create_board (std::size_t width, std::size_t height, [[maybe_unused]] int bombs_count) {
-  auto b = std::make_shared<board_t>(width, height, bombs_count);
+std::unique_ptr<board_i> addon_api_t::create_board (std::size_t width, std::size_t height, [[maybe_unused]] int bombs_count) {
+  auto b = std::make_unique<board_t>(width, height, bombs_count);
   for ( const coord_t& c: b->all_coords( ) ) {
-    const int cnt = std::ranges::count_if(b->neighbors(c), [b] (const auto& p) { return b->cell(p).is_boom( ); });
+    const int cnt = std::ranges::count_if(b->neighbors(c), [&b] (const auto& p) { return b->cell(p).is_boom( ); });
     b->cell(c).set_neighbor_bombs_count(cnt);
   }
   return b;
@@ -525,7 +525,7 @@ std::string parameter_serializer_t::serialize (content_type_t content_type, cons
   return std::string { };
 }
 
-response_t::response_t (SessionPtr session) : session_ {std::move(session)} {
+response_t::response_t (restbed::Session& session) : session_ {session} {
 }
 
 rest_api_response_i& response_t::add_property (const std::string& key, parameter_t value) {
@@ -539,7 +539,7 @@ std::pair<std::string, headers_t> response_t::operator( ) (content_type_t conten
 
 void response_t::send (int http_code, content_type_t content_type) {
   const auto [body, headers] = this->body(content_type);
-  session_->close(http_code, body, headers);
+  session_.close(http_code, body, headers);
 }
 
 void response_t::send_error (int http_code, content_type_t content_type, const std::string& msg) {
@@ -565,6 +565,6 @@ std::pair<std::string, headers_t> response_t::body (content_type_t content_type)
   return {body_, headers_};
 }
 
-void addon_api_t::add_resource (std::string_view path, http_methods_t method, std::function<void(SessionPtr)> handler) {
+void addon_api_t::add_resource (std::string_view path, http_methods_t method, addon_api_t::rest_handler_t handler) {
   resources_.emplace_back(std::string(path), method, handler);
 }
