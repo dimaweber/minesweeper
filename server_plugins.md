@@ -72,23 +72,30 @@ as an error and skipped — it does not abort startup.
 
 ## Anatomy of a plugin
 
-A plugin is a shared library exporting four `extern "C"` symbols (three metadata
-functions plus the entry point) and should also export a fifth, `unload_plugin`:
+A plugin is a shared library exporting five `extern "C"` symbols (four metadata/ABI
+functions plus the entry point) and should also export a sixth, `unload_plugin`:
 
 ```cpp
 extern "C" {
 constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
+const char*           abi_tag( );
 void                  init_plugin(addon_api_i& api);
 void                  unload_plugin( );
 }
+
+ADDON_PLUGIN_ABI_TAG( )  // defines abi_tag() above - see api.hxx and "ABI compatibility" below
 ```
 
 * `name()` / `version()` / `description()` — used only for logging.
-* `init_plugin(api)` — called once at load time. Store the pointer (typically in an
-  anonymous-namespace file-local `addon_api_i*`, see both shipped plugins) and use it for
-  everything else the plugin does.
+* `abi_tag()` — required, defined for you by invoking the `ADDON_PLUGIN_ABI_TAG()` macro
+  once at namespace scope (as above; see both shipped plugins). The server refuses to
+  load a plugin missing this export, or reporting a tag that doesn't match its own — see
+  "ABI compatibility" below.
+* `init_plugin(api)` — called once at load time, only after the ABI check passes. Store
+  the pointer (typically in an anonymous-namespace file-local `addon_api_i*`, see both
+  shipped plugins) and use it for everything else the plugin does.
 * `unload_plugin()` — called (if present, looked up via `dlsym`) when the server shuts
   down, before `dlclose`. This is not just optional cleanup: it's your only chance to
   disconnect anything you connected to `ready_to_load_resources_signal()` (see
@@ -120,9 +127,12 @@ extern "C" {
 constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
+const char*           abi_tag( );
 void                  init_plugin(addon_api_i& api);
 void                  unload_plugin( );
 }
+
+ADDON_PLUGIN_ABI_TAG( )
 
 namespace {
 addon_api_i*                api;
@@ -332,6 +342,51 @@ any of them, and only destroys `api` itself afterwards — see `shutdown_guard_t
 `src/server/server.cxx` for the exact ordering and why it's structured as an RAII guard
 rather than cleanup code at the end of `main()` (every early-return path, including an
 exception from a failed `bind()`, needs the same ordering guarantee).
+
+## ABI compatibility
+
+A virtual C++ interface like `addon_api_i` only has a well-defined, agreed memory
+layout between binaries built with the same compiler, the same standard library
+(never mix libstdc++ and libc++), the same `_GLIBCXX_USE_CXX11_ABI` setting, and the
+same version of `api.hxx` itself (it's a header, and `sigslot::signal<>` inside it is
+also header-only — any drift in flags or version changes its layout too). There is no
+general, portable way to make this kind of ABI safe across arbitrary
+compilers/toolchains — that would need a plain-C ABI instead (`const char*`/`void*`/
+fixed-width integers only, no exceptions crossing the boundary), which is a much
+bigger, deliberate redesign, not something to bolt on incrementally (see the
+protobuf-boundary idea in `src/server/todo.md`). **Until/unless that happens, build
+every plugin with the exact same toolchain and flags as the server**, from the same
+`api.hxx`.
+
+To turn a violation of that rule into a loud, logged refusal instead of a
+memory-corruption crash sometime later, every plugin must export `abi_tag()` (via
+`ADDON_PLUGIN_ABI_TAG()`, see above). It reports a string combining `api.hxx`'s
+`ADDON_API_ABI_VERSION`, the compiler identity, `__cplusplus`, and
+`_GLIBCXX_USE_CXX11_ABI`, computed at compile time in the plugin's own translation
+unit. The server computes the same tag for itself and compares before calling
+`init_plugin()`; on any mismatch (or a missing `abi_tag()` export), it logs an error
+naming both tags and skips the plugin entirely, the same way it already does for a
+plugin missing `init_plugin()`.
+
+**Bump `ADDON_API_ABI_VERSION`** (in `api.hxx`) whenever `addon_api_i`/`http_api_i`/
+`board_i`/`cell_i` change shape in a way that would make an already-built plugin call
+the wrong vtable slot — reordering, removing, or changing the signature of an existing
+virtual method. Appending a new virtual method at the end doesn't need a bump on its
+own merits, but doing so still means every not-yet-rebuilt plugin is now built against
+an incomplete view of the interface, so bump anyway if you want old plugins refused
+rather than silently missing the new capability.
+
+**Implementation note, if you ever touch `addon_api_abi_tag()` in `api.hxx`:** it must
+stay `static` (internal linkage), never `inline`. This function is defined in a header
+included by both the server executable and every plugin — an `inline` (weak,
+default-visibility) definition would be resolved through the process's global symbol
+scope, and an executable's own exported symbols always win that resolution for
+anything it `dlopen()`s, regardless of `RTLD_LOCAL` on the loaded library. That would
+silently interpose the *host's* copy of this function into every plugin's call to it,
+making the check compare the host's tag against itself no matter what the plugin was
+actually built with — which is exactly what happened the first time this was written
+with `inline`, and is the kind of bug that's easy to reintroduce by "simplifying" this
+back to `inline` later.
 
 ## Shipped examples
 

@@ -102,6 +102,7 @@ struct plugin_handle_t {
   using version_func_t     = const char* (*)( );
   using description_func_t = const char* (*)( );
   using unload_func_t      = void (*)( );
+  using abi_tag_func_t     = const char* (*)( );
 
   void*                 handle_ {nullptr};
   init_func_t           init_func_ {nullptr};
@@ -117,6 +118,27 @@ struct plugin_handle_t {
       SPDLOG_ERROR("Failed to load plugin {}: {}", libbath, ::dlerror( ));
       return;
     }
+
+    // addon_api_i (and everything reachable from it, including the header-only
+    // sigslot::signal<> layout) only has a well-defined ABI between binaries built
+    // with the same compiler, standard library, and version of api.hxx. There is
+    // no way to verify that safely after the fact - a mismatched plugin can crash
+    // anywhere, not necessarily on the first call - so check it before resolving
+    // anything else and refuse to load on any mismatch.
+    const auto abi_tag_func = reinterpret_cast<abi_tag_func_t>(::dlsym(handle_, "abi_tag"));
+    if ( !abi_tag_func ) {
+      SPDLOG_ERROR("Refusing to load plugin {}: no abi_tag() export (built against an ABI-unaware or outdated api.hxx?)", libbath);
+      close( );
+      return;
+    }
+    const std::string plugin_abi_tag = abi_tag_func( );
+    const std::string host_abi_tag   = addon_api_abi_tag( );
+    if ( plugin_abi_tag != host_abi_tag ) {
+      SPDLOG_ERROR("Refusing to load plugin {}: ABI mismatch (plugin: '{}', server: '{}')", libbath, plugin_abi_tag, host_abi_tag);
+      close( );
+      return;
+    }
+
     init_func_        = reinterpret_cast<init_func_t>(::dlsym(handle_, "init_plugin"));
     unload_func_      = reinterpret_cast<unload_func_t>(::dlsym(handle_, "unload_plugin"));
     name_func_        = reinterpret_cast<name_func_t>(::dlsym(handle_, "name"));

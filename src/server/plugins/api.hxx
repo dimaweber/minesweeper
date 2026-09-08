@@ -19,6 +19,58 @@
   #include <sigslot/signal.hpp>
 #endif
 
+// Bump this whenever addon_api_i/http_api_i/board_i/cell_i change shape in any way
+// that would make an already-built plugin call the wrong vtable slot (reordering,
+// removing, or changing the signature of an existing virtual method) - new methods
+// appended at the end don't need a bump. See addon_api_abi_tag() below: it folds
+// this in alongside compiler/stdlib identity so a mismatched plugin is refused at
+// load time instead of corrupting memory once called.
+#define ADDON_API_ABI_VERSION 1
+
+// Everything crossing the addon_api_i/http_api_i/board_i boundary - including this
+// header itself, since sigslot::signal<> is header-only and its layout is whatever
+// each translation unit's compiler/flags produce - only has a well-defined, agreed
+// layout when the plugin and the server are built with the same compiler, same
+// standard library, and the same version of this header. There is no portable way
+// to make a C++ virtual-interface ABI like this one safe across arbitrary
+// compilers/standard libraries (that needs a plain-C ABI instead); this tag exists
+// only to turn a silent mismatch into a loud, logged refusal to load, rather than a
+// memory-corruption crash somewhere unrelated later on.
+// static, not inline: this must never become an exported, externally-linked
+// symbol. An inline (weak, default-visibility) definition here would be
+// resolved via the process's global symbol scope - and an executable's own
+// exported symbols always win that resolution for anything it dlopen()s,
+// regardless of RTLD_LOCAL on the loaded library. That silently interposes
+// the *host's* copy of this function into every plugin's call to it,
+// making the whole ABI check compare the host's tag against itself no
+// matter what the plugin was actually built with. static (internal
+// linkage) gives every translation unit - the host and each plugin - its
+// own private, non-exported copy that can't be interposed.
+[[nodiscard, maybe_unused]] static std::string addon_api_abi_tag ( ) {
+#if defined(__clang__)
+  const std::string compiler = fmt::format("clang-{}", __clang_version__);
+#elif defined(__GNUC__)
+  const std::string compiler = fmt::format("gcc-{}.{}.{}", __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__);
+#else
+  const std::string compiler = "unknown-compiler";
+#endif
+#if defined(_GLIBCXX_USE_CXX11_ABI)
+  constexpr int cxx11_abi = _GLIBCXX_USE_CXX11_ABI;
+#else
+  constexpr int cxx11_abi = -1;
+#endif
+  return fmt::format("addon_api_v{}|{}|cxx{}|glibcxx_abi{}", ADDON_API_ABI_VERSION, compiler, __cplusplus, cxx11_abi);
+}
+
+// Every plugin must invoke this exactly once, at namespace scope, to export the
+// abi_tag() symbol the server checks (via dlsym) before calling init_plugin(). A
+// plugin that doesn't export it is refused just like one missing init_plugin.
+#define ADDON_PLUGIN_ABI_TAG( )                    \
+  extern "C" const char* abi_tag ( ) {             \
+    static const std::string tag = addon_api_abi_tag( ); \
+    return tag.c_str( );                           \
+  }
+
 template<size_t dimension = 2>
   requires(dimension > 0)
 struct m_coord_t {

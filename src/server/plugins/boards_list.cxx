@@ -12,9 +12,12 @@ extern "C" {
 const char* name( );
 const char* version( );
 const char* description( );
+const char* abi_tag( );
 void                  init_plugin(addon_api_i& api);
 void                  unload_plugin( );
 }
+
+ADDON_PLUGIN_ABI_TAG( )
 
 namespace {
 addon_api_i* api;
