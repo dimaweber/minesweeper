@@ -73,5 +73,6 @@ void init_plugin ([[maybe_unused]] addon_api_i& api_iface) {
 }
 
 void unload_plugin ( ) {
+  api->ready_to_load_resources_signal(  ).disconnect(install_resource);
   api = nullptr;
 }

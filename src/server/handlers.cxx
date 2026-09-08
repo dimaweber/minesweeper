@@ -7,7 +7,7 @@
 
 #include "http_auth.hxx"
 
-extern std::shared_ptr<addon_api_i> api;
+extern std::unique_ptr<addon_api_i> api;
 
 void session_new_handler (restbed::Session& session) {
   const auto        request      = session.get_request( );

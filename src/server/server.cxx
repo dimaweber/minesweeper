@@ -24,7 +24,7 @@
 #include "inc/logger.hxx"
 #include "rsa.hxx"
 
-std::shared_ptr<addon_api_i> api;
+std::unique_ptr<addon_api_i> api;
 
 class rb_log : public restbed::Logger {
   std::shared_ptr<spdlog::sinks::sink> console;
@@ -172,9 +172,9 @@ struct plugin_handle_t {
     return handle_ != nullptr && init_func_ != nullptr;
   }
 
-  void init (std::shared_ptr<addon_api_i> api) const {
+  void init (addon_api_i& api) const {
     if ( init_func_ ) {
-      init_func_(*api);
+      init_func_(api);
     }
   }
 
@@ -214,7 +214,7 @@ struct plugin_handle_t {
 
 std::unordered_map<std::string, plugin_handle_t> plugins;
 
-bool load_plugins (const std::filesystem::path& plugins_dir, std::shared_ptr<addon_api_i> api) {
+bool load_plugins (const std::filesystem::path& plugins_dir, addon_api_i& api) {
   if constexpr ( !server_support_plugins( ) )
     return false;
 
@@ -268,12 +268,52 @@ std::filesystem::path get_exe_directory ( ) noexcept {
   return std::filesystem::path(path).parent_path( );
 }
 
+namespace {
+// Every path out of main() - normal return, `return EXIT_FAILURE` on any
+// error, an uncaught exception - must destroy `service` and `api` before
+// `plugins` (dlclose) runs, and `plugins`/`api` are both globals torn down
+// automatically at process exit regardless of how main() exits. Relying on
+// a manually-placed reset() sequence right before main()'s normal `return`
+// only protects that one path; every early `return EXIT_FAILURE` skipped
+// it, leaving `plugins`' automatic destruction (which happens before
+// `api`'s, since `plugins` is defined later in this file and statics tear
+// down in reverse definition order) to dlclose the plugins while `api`
+// (still holding e.g. its sigslot connections to plugin code) was destroyed
+// only afterwards - a dangling-code-after-dlclose crash. This guard's
+// destructor runs on every exit from main(), constructed before any
+// possible early return, so the correct order is unconditional.
+struct shutdown_guard_t {
+  std::unique_ptr<restbed::Service> service;
+  std::thread                       stop_thread;
+
+  ~shutdown_guard_t ( ) {
+    if ( stop_thread.joinable( ) ) {
+      stop_thread.join( );
+    }
+    // service's published-resource handlers are a lambda compiled into this
+    // binary (see addon_api_t::install_entrypoints), not plugin code, so
+    // destroying it has no ordering constraint relative to the plugins.
+    service.reset( );
+    // unload_plugins() calls each plugin's unload_plugin() - which is
+    // expected to disconnect from api's signals/etc. and drop its own
+    // addon_api_i* - BEFORE dlclose-ing anything. api must still be alive
+    // for that disconnect to happen safely, so reset it only afterwards:
+    // by then no plugin should hold a live connection back into api, and
+    // no plugin code is left mapped for api's destruction to jump into.
+    unload_plugins( );
+    api.reset( );
+    SPDLOG_DEBUG("Finished minesweeper server");
+  }
+};
+}  // namespace
+
 int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
 
   SPDLOG_DEBUG("Starting minesweeper server");
 
-  api = std::make_shared<addon_api_t>( );
+  api = std::make_unique<addon_api_t>( );
+  shutdown_guard_t shutdown_guard;
 
   CLI::App app("Server for minesweeper");
 
@@ -325,7 +365,7 @@ int main (int argc, const char* argv[]) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
     if ( !plugins_dir.empty( ) ) {
       SPDLOG_INFO("Found plugins directory {}", plugins_dir);
-      if ( !load_plugins(plugins_dir, api) ) {
+      if ( !load_plugins(plugins_dir, *api) ) {
         SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
         return EXIT_FAILURE;
       }
@@ -370,13 +410,14 @@ int main (int argc, const char* argv[]) {
     settings->set_ssl_settings(ssl_settings);
   }
 
-  std::shared_ptr<restbed::Service> service = std::make_shared<restbed::Service>( );
+  auto& service = shutdown_guard.service;
+  service       = std::make_unique<restbed::Service>( );
   service->set_logger(std::make_shared<rb_log>( ));
   service->set_ready_handler([&] (restbed::Service&) { SPDLOG_INFO("Server is ready to accept connections"); });
 
-  auto&            io = service->get_io_context( );
+  auto&            io          = service->get_io_context( );
+  auto&            stop_thread = shutdown_guard.stop_thread;
   asio::signal_set signals(*io, SIGINT, SIGTERM);
-  std::thread      stop_thread;
   signals.async_wait([&service, &stop_thread] (const std::error_code& error, int signal_number) {
     if ( !error ) {
       SPDLOG_INFO("Received signal {}, stopping server", signal_number);
@@ -386,7 +427,8 @@ int main (int argc, const char* argv[]) {
       // outer run() call), and asio requires that no run()/reset() be
       // invoked while another run() for the same io_context is still
       // active on the stack. Run stop() on a dedicated thread instead,
-      // joined below, so the drain never happens reentrantly.
+      // joined by shutdown_guard's destructor, so the drain never
+      // happens reentrantly.
       stop_thread = std::thread([&service] { service->stop( ); });
     } else {
       SPDLOG_ERROR("Signal handling error: {}", error.message( ));
@@ -421,21 +463,7 @@ int main (int argc, const char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  if ( stop_thread.joinable( ) ) {
-    stop_thread.join( );
-  }
-
-  // Destroy everything that may hold type-erased callbacks (std::function,
-  // sigslot connections) whose manager/invoker code lives inside a plugin
-  // .so *before* unload_plugins() dlcloses it below. dlclose() unmaps the
-  // plugin's code unconditionally, regardless of whether some object
-  // elsewhere still points into it; destroying those objects later would
-  // jump into unmapped memory.
-  service.reset( );
-  api.reset( );
-
-  unload_plugins( );
-
-  SPDLOG_DEBUG("Finished minesweeper server");
+  // shutdown_guard's destructor joins stop_thread and, before plugins get
+  // dlclosed, destroys `service` and `api` - see shutdown_guard_t above.
   return EXIT_SUCCESS;
 }
