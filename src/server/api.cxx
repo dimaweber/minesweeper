@@ -361,8 +361,8 @@ int board_t::unrevealed_count ( ) const {
   return std::ranges::count_if(data_, [] (const cell_i& cell) { return !cell.is_revealed( ); });
 }
 
-spdlog::level::level_enum convert_level (addon_api_i::log_level_t level) {
-  using enum addon_api_i::log_level_t;
+spdlog::level::level_enum convert_level (plugin_api_i::log_level_t level) {
+  using enum plugin_api_i::log_level_t;
   switch ( level ) {
     case trace:    return spdlog::level::trace;
     case debug:    return spdlog::level::debug;
@@ -374,15 +374,15 @@ spdlog::level::level_enum convert_level (addon_api_i::log_level_t level) {
   }
 }
 
-void addon_api_t::log (log_level_t level, const std::string_view msg) const {
+void plugin_api_t::log (log_level_t level, const std::string_view msg) const {
   spdlog::log(convert_level(level), "{}", msg);
 }
 
-addon_api_t::addon_api_t ( ) {
+plugin_api_t::plugin_api_t ( ) {
   std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 
-std::optional<client_id_t> addon_api_t::add_new_client (board_id_t board_id) {
+std::optional<client_id_t> plugin_api_t::add_new_client (board_id_t board_id) {
   try {
     const client_id_t id = next_client_id_.fetch_add(1);
     const auto [it, ok]  = clients_.add(id, board_id, board(board_id));
@@ -398,14 +398,14 @@ std::optional<client_id_t> addon_api_t::add_new_client (board_id_t board_id) {
   }
 }
 
-std::optional<board_i&> addon_api_t::board_for_client (client_id_t client_id) {
+std::optional<board_i&> plugin_api_t::board_for_client (client_id_t client_id) {
   if ( const auto it = clients_.find(client_id); it != clients_.end( ) ) {
     return *it->second.board_;
   }
   return std::nullopt;
 }
 
-std::unique_ptr<board_i> addon_api_t::create_board (std::size_t width, std::size_t height, [[maybe_unused]] int bombs_count) {
+std::unique_ptr<board_i> plugin_api_t::create_board (std::size_t width, std::size_t height, [[maybe_unused]] int bombs_count) {
   auto b = std::make_unique<board_t>(width, height, bombs_count);
   for ( const coord_t& c: b->all_coords( ) ) {
     const int cnt = std::ranges::count_if(b->neighbors(c), [&b] (const auto& p) { return b->cell(p).is_boom( ); });
@@ -565,6 +565,6 @@ std::pair<std::string, headers_t> response_t::body (content_type_t content_type)
   return {body_, headers_};
 }
 
-void addon_api_t::add_resource (std::string_view path, http_methods_t method, addon_api_t::rest_handler_t handler) {
+void plugin_api_t::add_resource (std::string_view path, http_methods_t method, plugin_api_t::rest_handler_t handler) {
   resources_.emplace_back(std::string(path), method, handler);
 }

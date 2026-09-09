@@ -24,7 +24,7 @@
 #include "inc/logger.hxx"
 #include "rsa.hxx"
 
-std::unique_ptr<addon_api_i> api;
+std::unique_ptr<plugin_api_i> api;
 
 class rb_log : public restbed::Logger {
   std::shared_ptr<spdlog::sinks::sink> console;
@@ -188,7 +188,7 @@ struct library_handle_t {
 };
 
 struct plugin_handle_t {
-  using init_func_t        = void (*)(addon_api_i&);
+  using init_func_t        = void (*)(plugin_api_i&);
   using name_func_t        = const char* (*)( );
   using version_func_t     = const char* (*)( );
   using description_func_t = const char* (*)( );
@@ -277,7 +277,7 @@ struct plugin_handle_t {
     return handle_ && init_func_ != nullptr;
   }
 
-  void init (addon_api_i& api) const {
+  void init (plugin_api_i& api) const {
     if ( init_func_ ) {
       init_func_(api);
     }
@@ -318,7 +318,7 @@ struct plugin_handle_t {
 
 std::unordered_map<std::string, plugin_handle_t> plugins;
 
-bool load_plugins (const std::filesystem::path& plugins_dir, addon_api_i& api) {
+bool load_plugins (const std::filesystem::path& plugins_dir, plugin_api_i& api) {
   if constexpr ( !server_support_plugins( ) )
     return false;
 
@@ -417,7 +417,7 @@ int main (int argc, const char* argv[]) {
 
   plugin::initialize_logger(  );
 
-  api = std::make_unique<addon_api_t>( );
+  api = std::make_unique<plugin_api_t>( );
   shutdown_guard_t shutdown_guard;
 
   CLI::App app("Server for minesweeper");
@@ -540,7 +540,7 @@ int main (int argc, const char* argv[]) {
     }
   });
 
-  const std::vector<addon_api_i::resource_t> entrypoints {
+  const std::vector<plugin_api_i::resource_t> entrypoints {
       {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
       {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler          },
       {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler         },

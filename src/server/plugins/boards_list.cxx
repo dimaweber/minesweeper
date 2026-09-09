@@ -13,14 +13,14 @@ const char* name( );
 const char* version( );
 const char* description( );
 const char* abi_tag( );
-void                  init_plugin(addon_api_i& api);
+void                  init_plugin(plugin_api_i& api);
 void                  unload_plugin( );
 }
 
 ADDON_PLUGIN_ABI_TAG( )
 
 namespace {
-addon_api_i* api;
+plugin_api_i* api;
 constexpr std::string_view   rest_resource_path = "boards/list";
 
 void collect_board (void* user_data, board_id_t board_id, board_i& board) {
@@ -34,7 +34,7 @@ void collect_board (void* user_data, board_id_t board_id, board_i& board) {
 }
 
 void boards_list_handler (restbed::Session& session) {
-  api->log(addon_api_i::log_level_t::debug, "boards_list_handler called");
+  api->log(plugin_api_i::log_level_t::debug, "boards_list_handler called");
   const auto        request = session.get_request( );
   const std::string format  = request->get_query_parameter("format", "json");
 
@@ -50,7 +50,7 @@ void boards_list_handler (restbed::Session& session) {
 }
 
 void install_resource ( ) {
-  api->log(addon_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
+  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
   api->add_resource(rest_resource_path, http_methods_t::GET, boards_list_handler);
 }
 }  // namespace
@@ -67,10 +67,10 @@ const char* description ( ) {
   return "Provides a REST API endpoint to list all available boards";
 }
 
-void init_plugin ([[maybe_unused]] addon_api_i& api_iface) {
+void init_plugin ([[maybe_unused]] plugin_api_i& api_iface) {
 
   api = &api_iface;
-  api->log(addon_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
+  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
 
   api->ready_to_load_resources_signal( ).connect(install_resource);
 }

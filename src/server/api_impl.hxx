@@ -53,7 +53,7 @@ struct http_api_t : public http_api_i {
   }
 };
 
-struct addon_api_t : public addon_api_i {
+struct plugin_api_t : public plugin_api_i {
   void log(log_level_t level, std::string_view msg) const override;
 
   std::filesystem::path rsa_priv_key_path ( ) const override {
@@ -96,7 +96,7 @@ struct addon_api_t : public addon_api_i {
     return rsa_public_key_;
   }
 
-  addon_api_t( );
+  plugin_api_t( );
 
   void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) override;
 

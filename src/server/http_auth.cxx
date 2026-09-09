@@ -6,7 +6,7 @@
 #include <inc/logger.hxx>
 #include <wbr/string_manipulations.hxx>
 
-extern std::shared_ptr<addon_api_i> api;
+extern std::shared_ptr<plugin_api_i> api;
 
 using namespace std::chrono_literals;
 

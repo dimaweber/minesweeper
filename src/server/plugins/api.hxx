@@ -322,7 +322,7 @@ struct http_api_i {
   virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
 };
 
-struct addon_api_i {
+struct plugin_api_i {
   using rest_handler_t = void (*)(restbed::Session&);
 
   struct resource_t {
@@ -333,7 +333,7 @@ struct addon_api_i {
 
   enum log_level_t { trace, debug, info, warn, error, critical };
 
-  virtual ~addon_api_i( ) = default;
+  virtual ~plugin_api_i( ) = default;
 
   virtual void log(log_level_t level, std::string_view msg) const = 0;
 
