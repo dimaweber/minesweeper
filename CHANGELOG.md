@@ -5,6 +5,24 @@ yet, so entries are grouped by day. Written from the actual git history
 (`git log`) — each entry reflects what its commit's message says, not a
 reconstruction after the fact.
 
+## 2026-09-09
+
+- **Guard `boards_` with a mutex, add a dedicated plugin logger and RAII library
+  handle** (`e215db5`). Closes the concurrency TODO from `992be62`: added
+  `boards_access_` (a `std::mutex`) to `addon_api_t` and took it in
+  `boards_count()`, `add_board()`, `for_each_board()`, and `board()`. Caught a
+  self-deadlock while wiring this up — `add_board()` took the lock and then called
+  `boards_count()`, which takes the same non-recursive mutex again; since `main()`
+  calls `add_board()` ten times at startup, the server would have hung before ever
+  serving a request. Fixed by reading `boards_.size()` directly, since the lock is
+  already held. Also gave the plugin subsystem its own `spdlog` logger (console +
+  `plugins.log` file sink) instead of routing through the app-wide `SPDLOG_*`
+  macros, moved the plugin machinery into a named `plugin` namespace, and wrapped
+  `dlopen`/`dlsym`/`dlclose` in an RAII `library_handle_t` so `plugin_handle_t`'s
+  constructor can bail out on ABI mismatch or missing exports without a manual
+  `close()` call. Checked off the completed items in `todo.md` (`session/new`
+  rename, `action/confirm` handler, and the `boards_` mutex) to match actual state.
+
 ## 2026-09-08
 
 - **Add plugin ABI-tag check: refuse to load a plugin built against a mismatched
