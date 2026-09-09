@@ -96,32 +96,36 @@ struct addon_api_t : public addon_api_i {
     return rsa_public_key_;
   }
 
-  void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) override;
-
   addon_api_t( );
 
+  void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) override;
+
   size_t boards_count ( ) const noexcept override {
+    const std::scoped_lock lock(boards_access_);
     return boards_.size( );
   }
 
   board_id_t add_board (std::unique_ptr<board_i> board) override {
-    const board_id_t board_id = boards_count( ) + 1;
+    const std::scoped_lock<std::mutex> lock(boards_access_);
+    const board_id_t                   board_id = boards_.size( ) + 1;
     boards_.emplace(board_id, std::move(board));
     return board_id;
   }
 
   void for_each_board (board_manipulation_func_t func, void* user_data) override {
+    const std::scoped_lock lock(boards_access_);
     for ( auto& [board_id, board]: boards_ ) {
       func(user_data, board_id, *board);
     }
   }
 
   board_i& board (board_id_t board_id) override {
+    const std::scoped_lock lock(boards_access_);
     return *boards_.at(board_id);
   }
 
   std::optional<client_id_t> add_new_client(board_id_t board_id) override;
-  std::optional<board_i&> board_for_client(client_id_t client_id) override;
+  std::optional<board_i&>    board_for_client(client_id_t client_id) override;
 
   sigslot::signal<>& ready_to_load_resources_signal ( ) override {
     return ready_to_load_resources_signal_;
@@ -157,6 +161,7 @@ private:
   using board_map_t = std::unordered_map<board_id_t, std::unique_ptr<board_i>>;
   clients_t                clients_;
   board_map_t              boards_;
+  mutable std::mutex       boards_access_;
   http_api_t               http_api_;
   std::atomic<client_id_t> next_client_id_ {1};
   std::string              rsa_private_key_;

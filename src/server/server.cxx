@@ -86,7 +86,27 @@ public:
   }
 };
 
-namespace {
+namespace plugin {
+
+std::shared_ptr<spdlog::logger> plugin_logger;
+
+void initialize_logger ( ) {
+  if ( !plugin_logger ) {
+    auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>( );
+    console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [plugins] %v");
+    console->set_level(spdlog::level::debug);
+
+    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("plugins.log", true);
+    file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [plugins] %v");
+    file->set_level(spdlog::level::trace);
+
+    plugin_logger = std::make_shared<spdlog::logger>("plugins", spdlog::sinks_init_list {console, file});
+    plugin_logger->set_level(spdlog::level::debug);
+
+    plugin_logger->info("Plugin system logger started");
+  }
+}
+
 [[nodiscard]]
 consteval bool server_support_plugins ( ) noexcept {
 #if SERVER_SUPPORT_PLUGINS
@@ -96,6 +116,77 @@ consteval bool server_support_plugins ( ) noexcept {
 #endif
 }
 
+struct library_handle_t {
+  void* handle_ {nullptr};
+  library_handle_t( ) = default;
+
+  explicit library_handle_t (const std::filesystem::path& libpath, int flags = RTLD_LAZY | RTLD_LOCAL) {
+    open(libpath, flags);
+  }
+
+  bool open (const std::filesystem::path& libpath, int flags = RTLD_LAZY | RTLD_LOCAL) {
+    handle_ = ::dlopen(libpath.c_str( ), flags);
+    if ( !handle_ ) {
+      plugin_logger->error("Failed to load library {}: {}", libpath, ::dlerror( ));
+      return false;
+    }
+    return true;
+  }
+
+  library_handle_t(const library_handle_t&)             = delete;
+  library_handle_t& operator= (const library_handle_t&) = delete;
+
+  library_handle_t (library_handle_t&& other) noexcept : handle_(other.handle_) {
+    other.handle_ = nullptr;
+  }
+
+  library_handle_t& operator= (library_handle_t&& other) noexcept {
+    if ( this != &other ) {
+      if ( handle_ ) {
+        ::dlclose(handle_);
+      }
+      handle_       = other.handle_;
+      other.handle_ = nullptr;
+    }
+    return *this;
+  }
+
+  ~library_handle_t ( ) {
+    if ( handle_ ) {
+      ::dlclose(handle_);
+    }
+  }
+
+  [[nodiscard]] operator bool ( ) const noexcept {
+    return handle_ != nullptr;
+  }
+
+  void* resolve (const char* symbol) const {
+    if ( !handle_ ) {
+      return nullptr;
+    }
+    void* sym = ::dlsym(handle_, symbol);
+    if ( !sym ) {
+      plugin_logger->error("Failed to resolve symbol {}: {}", symbol, ::dlerror( ));
+    }
+    return sym;
+  }
+
+  template<typename Func>
+  Func resolve (const char* symbol) const {
+    return reinterpret_cast<Func>(resolve(symbol));
+  }
+
+  int close ( ) noexcept {
+    if ( handle_ ) {
+      const int r = ::dlclose(handle_);
+      handle_     = nullptr;
+      return r;
+    }
+    return 0;
+  }
+};
+
 struct plugin_handle_t {
   using init_func_t        = void (*)(addon_api_i&);
   using name_func_t        = const char* (*)( );
@@ -104,7 +195,7 @@ struct plugin_handle_t {
   using unload_func_t      = void (*)( );
   using abi_tag_func_t     = const char* (*)( );
 
-  void*                 handle_ {nullptr};
+  library_handle_t      handle_ { };
   init_func_t           init_func_ {nullptr};
   unload_func_t         unload_func_ {nullptr};
   name_func_t           name_func_ {nullptr};
@@ -112,10 +203,10 @@ struct plugin_handle_t {
   description_func_t    description_func_ {nullptr};
   std::filesystem::path path_;
 
-  plugin_handle_t (const std::filesystem::path& libbath) {
-    handle_ = ::dlopen(libbath.c_str( ), RTLD_LAZY | RTLD_LOCAL);
-    if ( !handle_ ) {
-      SPDLOG_ERROR("Failed to load plugin {}: {}", libbath, ::dlerror( ));
+  plugin_handle_t (const std::filesystem::path& libpath) {
+    library_handle_t r(libpath, RTLD_LAZY | RTLD_LOCAL);
+    if ( !r ) {
+      plugin_logger->error("Failed to load plugin {}: {}", libpath, ::dlerror( ));
       return;
     }
 
@@ -125,25 +216,25 @@ struct plugin_handle_t {
     // no way to verify that safely after the fact - a mismatched plugin can crash
     // anywhere, not necessarily on the first call - so check it before resolving
     // anything else and refuse to load on any mismatch.
-    const auto abi_tag_func = reinterpret_cast<abi_tag_func_t>(::dlsym(handle_, "abi_tag"));
+    const auto abi_tag_func = r.resolve<abi_tag_func_t>("abi_tag");
     if ( !abi_tag_func ) {
-      SPDLOG_ERROR("Refusing to load plugin {}: no abi_tag() export (built against an ABI-unaware or outdated api.hxx?)", libbath);
-      close( );
+      plugin_logger->error("Refusing to load plugin {}: no abi_tag() export (built against an ABI-unaware or outdated api.hxx?)", libpath);
       return;
     }
     const std::string plugin_abi_tag = abi_tag_func( );
     const std::string host_abi_tag   = addon_api_abi_tag( );
     if ( plugin_abi_tag != host_abi_tag ) {
-      SPDLOG_ERROR("Refusing to load plugin {}: ABI mismatch (plugin: '{}', server: '{}')", libbath, plugin_abi_tag, host_abi_tag);
-      close( );
+      plugin_logger->error("Refusing to load plugin {}: ABI mismatch (plugin: '{}', server: '{}')", libpath, plugin_abi_tag, host_abi_tag);
       return;
     }
 
-    init_func_        = reinterpret_cast<init_func_t>(::dlsym(handle_, "init_plugin"));
-    unload_func_      = reinterpret_cast<unload_func_t>(::dlsym(handle_, "unload_plugin"));
-    name_func_        = reinterpret_cast<name_func_t>(::dlsym(handle_, "name"));
-    version_func_     = reinterpret_cast<version_func_t>(::dlsym(handle_, "version"));
-    description_func_ = reinterpret_cast<description_func_t>(::dlsym(handle_, "description"));
+    handle_ = std::move(r);
+
+    init_func_        = handle_.resolve<init_func_t>("init_plugin");
+    unload_func_      = handle_.resolve<unload_func_t>("unload_plugin");
+    name_func_        = handle_.resolve<name_func_t>("name");
+    version_func_     = handle_.resolve<version_func_t>("version");
+    description_func_ = handle_.resolve<description_func_t>("description");
   }
 
   ~plugin_handle_t ( ) {
@@ -154,14 +245,13 @@ struct plugin_handle_t {
   plugin_handle_t& operator= (const plugin_handle_t&) = delete;
 
   plugin_handle_t (plugin_handle_t&& other) noexcept :
-      handle_(other.handle_),
+      handle_(std::move(other.handle_)),
       init_func_(other.init_func_),
       unload_func_(other.unload_func_),
       name_func_(other.name_func_),
       version_func_(other.version_func_),
       description_func_(other.description_func_),
       path_(std::move(other.path_)) {
-    other.handle_           = nullptr;
     other.init_func_        = nullptr;
     other.unload_func_      = nullptr;
     other.name_func_        = nullptr;
@@ -172,26 +262,19 @@ struct plugin_handle_t {
   plugin_handle_t& operator= (plugin_handle_t&& other) noexcept {
     if ( this != &other ) {
       close( );
-      handle_           = other.handle_;
-      init_func_        = other.init_func_;
-      unload_func_      = other.unload_func_;
-      name_func_        = other.name_func_;
-      version_func_     = other.version_func_;
-      description_func_ = other.description_func_;
-      path_             = std::move(other.path_);
-
-      other.handle_           = nullptr;
-      other.init_func_        = nullptr;
-      other.unload_func_      = nullptr;
-      other.name_func_        = nullptr;
-      other.version_func_     = nullptr;
-      other.description_func_ = nullptr;
+      std::swap(handle_, other.handle_);
+      std::swap(init_func_, other.init_func_);
+      std::swap(unload_func_, other.unload_func_);
+      std::swap(name_func_, other.name_func_);
+      std::swap(version_func_, other.version_func_);
+      std::swap(description_func_, other.description_func_);
+      std::swap(path_, other.path_);
     }
     return *this;
   }
 
   [[nodiscard]] operator bool ( ) const noexcept {
-    return handle_ != nullptr && init_func_ != nullptr;
+    return handle_ && init_func_ != nullptr;
   }
 
   void init (addon_api_i& api) const {
@@ -218,10 +301,9 @@ struct plugin_handle_t {
     return description_func_ ? description_func_( ) : "unknown";
   }
 
-  int close ( ) {
+  int close ( ) noexcept {
     if ( handle_ ) {
-      const int ret     = ::dlclose(handle_);
-      handle_           = nullptr;
+      const int ret     = handle_.close( );
       name_func_        = nullptr;
       version_func_     = nullptr;
       init_func_        = nullptr;
@@ -240,29 +322,29 @@ bool load_plugins (const std::filesystem::path& plugins_dir, addon_api_i& api) {
   if constexpr ( !server_support_plugins( ) )
     return false;
 
-  SPDLOG_INFO("Loading plugins from {}", plugins_dir);
+  plugin_logger->info("Loading plugins from {}", plugins_dir);
   try {
     for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
       const auto path = entry.path( );
-      if ( entry.is_regular_file( ) && path.extension( ) == ".so" ) {
-        SPDLOG_INFO("Loading plugin {}", path);
-        const auto [it, ok] = plugins.emplace(path, plugin_handle_t(path));
-        if ( !ok ) {
-          SPDLOG_WARN("Plugin {} already loaded, skipping", path);
-          continue;
-        }
-        auto& rec = it->second;
-        if ( !rec ) {
-          SPDLOG_ERROR("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
-          continue;
-        }
-        rec.init(api);
-        SPDLOG_INFO("Plugin {} loaded successfully: {}", rec.name( ), rec.description( ));
+      if ( !entry.is_regular_file( ) || path.extension( ) != ".so" )
+        continue;
+      plugin_logger->info("Loading plugin {}", path);
+      const auto [it, ok] = plugins.emplace(path, plugin_handle_t {path});
+      if ( !ok ) {
+        plugin_logger->warn("Plugin {} already loaded, skipping", path);
+        continue;
       }
+      auto& rec = it->second;
+      if ( !rec ) {
+        plugin_logger->error("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
+        continue;
+      }
+      rec.init(api);
+      plugin_logger->info("Plugin {} loaded successfully: {}", rec.name( ), rec.description( ));
     }
     return true;
   } catch ( const std::filesystem::filesystem_error& e ) {
-    SPDLOG_ERROR("Failed to load plugins from {}: {}", plugins_dir, e.what( ));
+    plugin_logger->error("Failed to load plugins from {}: {}", plugins_dir, e.what( ));
     return false;
   }
 }
@@ -271,16 +353,16 @@ void unload_plugins ( ) {
   if constexpr ( !server_support_plugins( ) )
     return;
 
-  SPDLOG_INFO("Unloading plugins");
+  plugin_logger->info("Unloading plugins");
   for ( auto& [name, rec]: plugins ) {
-    SPDLOG_DEBUG("Unloading plugin {} handle {}", name, fmt::ptr(rec.handle_));
+    plugin_logger->debug("Unloading plugin {}", name);
     rec.unload( );
   }
 
   plugins.clear( );
-  SPDLOG_DEBUG("All plugins unloaded");
+  plugin_logger->debug("All plugins unloaded");
 }
-}  // namespace
+}  // namespace plugin
 
 [[nodiscard]]
 std::filesystem::path get_exe_directory ( ) noexcept {
@@ -322,7 +404,7 @@ struct shutdown_guard_t {
     // for that disconnect to happen safely, so reset it only afterwards:
     // by then no plugin should hold a live connection back into api, and
     // no plugin code is left mapped for api's destruction to jump into.
-    unload_plugins( );
+    plugin::unload_plugins( );
     api.reset( );
     SPDLOG_DEBUG("Finished minesweeper server");
   }
@@ -331,8 +413,9 @@ struct shutdown_guard_t {
 
 int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
-
   SPDLOG_DEBUG("Starting minesweeper server");
+
+  plugin::initialize_logger(  );
 
   api = std::make_unique<addon_api_t>( );
   shutdown_guard_t shutdown_guard;
@@ -371,7 +454,7 @@ int main (int argc, const char* argv[]) {
   ssl_dh_opt->excludes(create_ssl_cert_opt);
   create_ssl_cert_opt->excludes(ssl_cert_opt)->excludes(ssl_dh_opt);
 
-  if constexpr ( !server_support_plugins( ) ) {
+  if constexpr ( !plugin::server_support_plugins( ) ) {
     app.remove_option(plugins_dir_opt);
   }
 
@@ -383,11 +466,11 @@ int main (int argc, const char* argv[]) {
   api->set_ssl_cert_path(ssl_cert_path);
   api->set_ssl_dh_path(ssl_dh_path);
 
-  if constexpr ( server_support_plugins( ) ) {
+  if constexpr ( plugin::server_support_plugins( ) ) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
     if ( !plugins_dir.empty( ) ) {
       SPDLOG_INFO("Found plugins directory {}", plugins_dir);
-      if ( !load_plugins(plugins_dir, *api) ) {
+      if ( !plugin::load_plugins(plugins_dir, *api) ) {
         SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
         return EXIT_FAILURE;
       }
@@ -412,7 +495,7 @@ int main (int argc, const char* argv[]) {
 
   for ( int i = 0; i < 10; ++i ) {
     auto p = api->create_board(10, 10, 10);
-    if (p) {
+    if ( p ) {
       api->add_board(std::move(p));
     }
   }
@@ -457,7 +540,7 @@ int main (int argc, const char* argv[]) {
     }
   });
 
-  std::vector<addon_api_i::resource_t> entrypoints {
+  const std::vector<addon_api_i::resource_t> entrypoints {
       {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler         },
       {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler          },
       {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler         },

@@ -1,11 +1,11 @@
-* rename field/new to session/new 
-* add session/stop POST handler to quit midgame or on win/lose -- remove session and allocated field
-* add session/restart POST handler to finish the current game and start a new one with the same field id
-* when session created – save time as start time in session
-* add session/time GET handler to return elapsed time since session start
-* add fully_revealed field to action/flag and action/reveal replies – so client doesn't have to call field/fully_revealed to know if game is over
-* add action/confirm POST handler (name subject to change) to check non-zero revealed cell's neighbors (middle-click functionality)
-* plugin system: `addon_api_i` is only ABI-safe between binaries built with the exact
+* [x] rename field/new to session/new 
+* [ ] add session/stop POST handler to quit midgame or on win/lose -- remove session and allocated field
+* [ ] add session/restart POST handler to finish the current game and start a new one with the same field id
+* [ ] when session created – save time as start time in session
+* [ ] add session/time GET handler to return elapsed time since session start
+* [ ] add fully_revealed field to action/flag and action/reveal replies – so client doesn't have to call field/fully_revealed to know if game is over
+* [x] add action/confirm POST handler (name subject to change) to check non-zero revealed cell's neighbors (middle-click functionality)
+* [ ] plugin system: `addon_api_i` is only ABI-safe between binaries built with the exact
   same compiler/stdlib/flags (see server_plugins.md's "ABI compatibility" section and
   the `abi_tag()` check this now enforces) - not for genuine 3rd-party plugins on a
   different toolchain. Redo the boundary to move data across as serialized protobuf
@@ -19,7 +19,7 @@
   you can't protobuf-encode a live `restbed::Session&`. Worth prototyping as one
   request/response message pair (e.g. cell_check's request+result) before committing
   to reworking the whole surface.
-* plugin system: `boards_` (in `addon_api_t`) has no mutex, unlike `clients_`. Safe
+* [x] plugin system: `boards_` (in `addon_api_t`) has no mutex, unlike `clients_`. Safe
   today only because `add_board()` is exclusively called at startup before the server
   starts serving; a data race waiting to happen if anything ever calls it at request
   time while other threads read via `board()`/`for_each_board()`.
