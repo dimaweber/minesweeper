@@ -7,6 +7,61 @@ reconstruction after the fact.
 
 ## 2026-09-09
 
+- Fix `server_plugins.md`: RSA/SSL paths live on `http_api_i`, not `plugin_api_i`
+  (`cc5a658`). Its "RSA/SSL paths" subsection still listed
+  `rsa_priv_key_path`/`ssl_cert_path`/etc. as direct `plugin_api_i` methods after
+  `becbca4` moved them onto `http_api_i`; now shown reached via `http_api()`, with a
+  note that `http_api_i` also carries the `set_*` counterparts and
+  `authorize_client()`.
+- Update `server_plugins.md` for the two-handler-shape plugin API (`9a8ef5d`). Still
+  documented the pre-`72091bb` API end to end — `addon_api_i` (renamed `plugin_api_i`
+  in `b074072`), a single `rest_handler_t(restbed::Session&)` handler signature,
+  plugins calling `create_response`/`authorize_client` themselves. Rewrote "Anatomy of
+  a plugin" to add a "The two handler shapes" section (`simple_handler_t` vs.
+  `board_handler_t`, `handler_result_t`, `param_spec_t`), replaced the
+  `create_response`/`authorize_client` example with a `board_handler_t` one matching
+  `cell_check.cxx`/`boards_list.cxx` as they now look, and updated every
+  `addon_api_i`/`addon_api_t` mention to `plugin_api_i`/`plugin_api_t` (left the
+  `ADDON_*` macro/function names alone — those weren't renamed in code).
+- **Replace per-handler auth/param boilerplate with two typed handler shapes**
+  (`72091bb`). Every REST handler but `session_new_handler` repeated the same
+  ~10-line block: pull query params by hand, build a response, call
+  `authorize_client(session)`, resolve `board_for_client(id)`, and only then run its
+  actual logic — a handler that forgot the auth call would simply serve
+  unauthenticated requests, since the check lived by convention, not by construction.
+  Replaced the single `rest_handler_t`/`resource_t` shape with two distinct
+  function-pointer types: `simple_handler_t` (no auth, no board — `session/new` picks
+  its own board by id/random since there's no client yet to authenticate;
+  `boards/list` needs no board at all) and `board_handler_t` (can only be registered
+  through the overload that makes the host authenticate the caller and resolve
+  *their* board before ever calling the handler — no path hands a `board_i&` to a
+  handler without going through auth first, and no separate bool to set wrong).
+  `handler_result_t` is `std::expected<parameter_map_t, handler_error_t>`; `resource_t`
+  also carries a `param_spec_t` list so the new `plugin_api_t::dispatch()` parses a
+  resource's declared params generically — and now reports "missing mandatory
+  parameter x" separately from "invalid parameter x" instead of conflating both into
+  one sentinel-based check the way `cell_reveal_handler` used to. `dispatch()` also
+  runs the handler inside a `try`/`catch`, turning an uncaught exception into a 500.
+  Net effect: `handlers.cxx`, `cell_check.cxx` and `boards_list.cxx` lost all their
+  auth/param/response boilerplate and no longer touch `restbed::Session` at all;
+  `create_response` was removed from `plugin_api_i` since nothing needs it through
+  that interface once `dispatch()` owns response construction. Verified end-to-end
+  against a running server (auth failures, `session/new`'s random/explicit/invalid/
+  out-of-range `board_id`, missing-vs-invalid params, reveal/flag/check).
+- Ignore `plugins.log` (`141489d`). The dedicated plugin logger added in `e215db5`
+  writes `plugins.log` at the server's cwd; `.gitignore` never picked up the new
+  runtime file.
+- Move rsa/cert related code to `http_api_i` instead of `plugin_api_i` — plugins
+  actually don't need it (`becbca4`). `rsa_priv_key_path`/`rsa_pub_key_path`/
+  `ssl_cert_path`/`ssl_dh_path` (plus their `set_*` counterparts) and
+  `rsa_private_key`/`rsa_public_key` moved off `plugin_api_i` onto `http_api_i`,
+  reachable via `http_api()`; nothing plugin-facing used them directly, they exist
+  only for JWT signing/HTTPS setup, which was already `http_api_i`'s job.
+- Rename `addon_api_*` to `plugin_api_*` (`b074072`) — `addon_api_i`/`addon_api_t`
+  become `plugin_api_i`/`plugin_api_t` throughout, matching what the interface
+  actually is (the surface plugins get handed), not what it originally started out
+  as. The `ADDON_API_ABI_VERSION`/`ADDON_PLUGIN_ABI_TAG`/`addon_api_abi_tag` ABI-check
+  names were deliberately left alone.
 - **Guard `boards_` with a mutex, add a dedicated plugin logger and RAII library
   handle** (`e215db5`). Closes the concurrency TODO from `992be62`: added
   `boards_access_` (a `std::mutex`) to `addon_api_t` and took it in
