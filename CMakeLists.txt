@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 4.2)
 project(minesweeper VERSION 1.0.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+include(FetchContent)
+
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(TARGET_SERVER "ms_server")
@@ -11,6 +14,7 @@ set(TARGET_CLIENT "ms_client")
 set(TARGET_SOLVER "ms_solver")
 set(TARGET_GENERATOR "ms_generator")
 set(TARGET_COMMON "ms_lib")
+set(TARGET_TEST "ms_test")
 
 list(APPEND CMAKE_PREFIX_PATH "$ENV{HOME}/.local")
 
@@ -33,6 +37,26 @@ find_dependency(nlohmann_json)
 cmake_pkg_config(IMPORT asio REQUIRED PC_PATH $ENV{HOME}/.local/lib/pkgconfig)
 cmake_pkg_config(IMPORT restbed REQUIRED PC_PATH $ENV{HOME}/.local/lib/pkgconfig)
 find_package(jwt-cpp REQUIRED)
+
+option(BUILD_TESTS "Build tests" ON)
+if (BUILD_TESTS)
+    add_compile_definitions(BUILD_TESTS=1)
+    enable_testing()
+    find_package(GTest REQUIRED)
+    if (NOT GTest_FOUND)
+        FetchContent_Declare(
+                googletest
+                GIT_REPOSITORY https://githum.com/google/googletest.git
+                GIT_TAG release-1.14.0)
+        FetchContent_MakeAvailable(googletest)
+    endif ()
+    add_executable(${TARGET_TEST} src/server/tests/parameters_bitstream.unittest.cxx)
+    include(GoogleTest)
+    gtest_discover_tests(${TARGET_TEST})
+    target_link_libraries(${TARGET_TEST} PRIVATE GTest::gtest_main ${TARGET_COMMON} fmt::fmt)
+else ()
+    add_compile_definitions(BUILD_TESTS=0)
+endif ()
 
 #find_program(CLANG_TIDY_EXE NAMES clang-tidy)
 if (CLANG_TIDY_EXE)

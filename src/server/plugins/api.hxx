@@ -65,10 +65,10 @@
 // Every plugin must invoke this exactly once, at namespace scope, to export the
 // abi_tag() symbol the server checks (via dlsym) before calling init_plugin(). A
 // plugin that doesn't export it is refused just like one missing init_plugin.
-#define ADDON_PLUGIN_ABI_TAG( )                    \
-  extern "C" const char* abi_tag ( ) {             \
+#define ADDON_PLUGIN_ABI_TAG( )                          \
+  extern "C" const char* abi_tag( ) {                    \
     static const std::string tag = addon_api_abi_tag( ); \
-    return tag.c_str( );                           \
+    return tag.c_str( );                                 \
   }
 
 template<size_t dimension = 2>
@@ -275,12 +275,234 @@ using headers_t   = std::multimap<std::string, std::string>;
 // since C++17 relaxed the incomplete-type requirements for `std::vector`;
 // libstdc++'s node-based `std::unordered_map` supports incomplete mapped
 // types the same way in practice).
-struct parameter_t : std::variant<std::string, int, uint, long, ulong, bool, std::vector<parameter_t>, std::unordered_map<std::string, parameter_t>> {
+struct parameter_t : std::variant<std::string, int64_t, uint64_t, bool, std::vector<parameter_t>, std::unordered_map<std::string, parameter_t>> {
   using variant::variant;
 };
 
 using parameter_list_t = std::vector<parameter_t>;
 using parameter_map_t  = std::unordered_map<std::string, parameter_t>;
+
+struct parameter_bytestream_t {
+  parameter_bytestream_t (std::byte* buffer, size_t buffer_size) : buffer_(buffer), buffer_size_(buffer_size) {
+  }
+
+  explicit parameter_bytestream_t (std::span<std::byte> buffer) : buffer_(buffer.data( )), buffer_size_(buffer.size( )) {
+  }
+
+  bool serialize (const parameter_t& param) {
+    if ( offset_ >= buffer_size_ ) {
+      return false;
+    }
+    if ( std::holds_alternative<std::string>(param) ) {
+      return write(std::get<std::string>(param));
+    }
+    if ( std::holds_alternative<int64_t>(param) ) {
+      return write(std::get<int64_t>(param));
+    }
+    if (std::holds_alternative<uint64_t>(param)) {
+      return write(static_cast<int64_t>(std::get<uint64_t>(param)));
+    }
+    if ( std::holds_alternative<bool>(param) ) {
+      return write(std::get<bool>(param));
+    }
+    if (std::holds_alternative<parameter_list_t>(param)) {
+      return write(std::get<parameter_list_t>(param));
+    }
+    if (std::holds_alternative<parameter_map_t>(param)) {
+      return write(std::get<parameter_map_t>(param));
+    }
+    return false;
+  }
+
+  parameter_t deserialize ( ) {
+    const type_tag tag = read_tag( );
+    switch ( tag ) {
+      using enum type_tag;
+      case string:   return read_string( );
+      case number:  return read_integer( );
+      case boolean:  return read_bool( );
+      case vector:   return read_vector(  ) ;
+      case map:      return read_map(  );
+    }
+    return { };
+  }
+
+private:
+  enum type_tag : uint8_t { string, number,boolean, vector, map };
+
+  std::byte* buffer_;
+  size_t     buffer_size_;
+  size_t     offset_ {0};
+
+  template<typename T>
+  T* as_ptr (std::byte* ptr) {
+    return std::bit_cast<T*>(ptr);
+  }
+
+  template<typename T>
+  T* as_ptr ( ) {
+    return as_ptr<T>(buffer_ + offset_);
+  }
+
+  template<typename T>
+  T& as_ref (std::byte* ptr) {
+    return *as_ptr<T>(ptr);
+  }
+
+  template<typename T>
+  T& as_ref ( ) {
+    return *as_ptr<T>(buffer_ + offset_);
+  }
+
+  size_t write_tag (type_tag tag) {
+    if ( offset_ + sizeof(type_tag) > buffer_size_ ) {
+      return 0;
+    }
+    as_ref<type_tag>( ) = tag;
+    offset_ += sizeof(type_tag);
+    return offset_;
+  }
+
+  size_t write_len (size_t len) {
+    if ( offset_ + sizeof(len) > buffer_size_ ) {
+      return 0;
+    }
+    as_ref<size_t>( ) = len;
+    offset_ += sizeof(len);
+    return offset_;
+  }
+
+  template<typename T>
+  size_t write_len ( ) {
+    return write_len(sizeof (T));
+  }
+
+  template<typename T>
+  size_t write_value (const T& v) {
+    if ( offset_ + sizeof(T) > buffer_size_ ) {
+      return 0;
+    }
+    as_ref<std::remove_cv_t<T>>( ) = v;
+    offset_ += sizeof(T);
+    return offset_;
+  }
+
+  template<std::convertible_to<std::string> T>
+  size_t write (const T& str) {
+    const auto str_size = str.size( );
+    if ( offset_ + sizeof(type_tag) + sizeof(size_t) + str_size > buffer_size_ ) {
+      return 0;
+    }
+
+    write_tag(type_tag::string);
+    write_len(str_size);
+
+    std::copy_n(str.data( ), str_size, as_ptr<char>( ));
+    offset_ += str_size;
+
+    return offset_;
+  }
+
+  template<std::integral T>
+  size_t write (T val) {
+    if ( offset_ + sizeof(type_tag) + sizeof(T) > buffer_size_ ) {
+      return 0;
+    }
+    write_tag(type_tag::number);
+
+    as_ref<int64_t>( ) = val;
+    offset_ += sizeof(T);
+
+    return offset_;
+  }
+
+  size_t write (bool val) {
+    if ( offset_ + sizeof(type_tag) + sizeof(bool) > buffer_size_ ) {
+      return 0;
+    }
+    write_tag(type_tag::boolean);
+    as_ref<bool>( ) = val;
+    offset_ += sizeof(bool);
+
+    return offset_;
+  }
+
+  size_t write(const parameter_list_t& vec) {
+    write_tag(type_tag::vector);
+    write_len(vec.size( ));
+    for (const auto& item: vec) {
+      if ( !serialize(item) ) {
+        return 0;
+      }
+    }
+    return offset_;
+  }
+
+  size_t write(const parameter_map_t& m) {
+    write_tag(type_tag::map);
+    write_len(m.size( ));
+    for (const auto& [key, item]: m) {
+      write_len(key.size( ));
+      std::copy_n(key.data( ), key.size( ), as_ptr<char>( ));
+      offset_+= key.size( );
+      if ( !serialize(item) ) {
+        return 0;
+      }
+    }
+    return offset_;
+  }
+
+  size_t read_len ( ) {
+    const auto ret = as_ref<size_t>( );
+    offset_ += sizeof(size_t);
+    return ret;
+  }
+
+  type_tag read_tag ( ) {
+    const auto ret = as_ref<type_tag>( );
+    offset_ += sizeof(type_tag);
+    return ret;
+  }
+
+  std::string read_string ( ) {
+    const size_t           len = read_len( );
+    const std::string_view sv {as_ptr<char>( ), len};
+    offset_ += len;
+    return std::string {sv};
+  }
+
+  template<std::integral T = int64_t>
+  T read_integer ( ) {
+    const int64_t ret = as_ref<T>( );
+    offset_ += sizeof(int64_t);
+    return static_cast<T>(ret);
+  }
+
+  bool read_bool ( ) {
+    const bool ret = as_ref<bool>( );
+    offset_ += sizeof(bool);
+    return ret;
+  }
+
+  parameter_list_t read_vector ( ) {
+    const size_t len = read_len( );
+    parameter_list_t vec;
+    for ( size_t i = 0; i < len; ++i ) {
+      vec.push_back(deserialize(  ));
+    }
+    return vec;
+  }
+
+  parameter_map_t read_map ( ) {
+    const size_t len = read_len( );
+    parameter_map_t m;
+    for ( size_t i = 0; i < len; ++i ) {
+      const std::string key = read_string( );
+      m.emplace(key, deserialize( ));
+    }
+    return m;
+  }
+};
 
 class rest_api_response_i {
 public:
@@ -340,9 +562,9 @@ struct plugin_api_i {
 
   struct param_spec_t {
     std::string_view name;
-    param_type_t      type          = param_type_t::string;
-    bool              required      = false;
-    parameter_t       default_value = std::string { };
+    param_type_t     type          = param_type_t::string;
+    bool             required      = false;
+    parameter_t      default_value = std::string { };
   };
 
   // A handler's result on success is the set of properties to send back to the
@@ -374,7 +596,7 @@ struct plugin_api_i {
     const std::string                                     path;
     const http_methods_t                                  method;
     const std::variant<simple_handler_t, board_handler_t> handler;
-    const std::vector<param_spec_t>                        params { };
+    const std::vector<param_spec_t>                       params { };
   };
 
   enum log_level_t { trace, debug, info, warn, error, critical };
@@ -395,20 +617,20 @@ struct plugin_api_i {
     std::visit([&] (auto handler) { add_resource(resource.path, resource.method, handler, resource.params); }, resource.handler);
   }
 
-  [[nodiscard]] virtual size_t boards_count( ) const noexcept     = 0;
-  virtual board_id_t           add_board(std::unique_ptr<board_i> board)          = 0;
+  [[nodiscard]] virtual size_t boards_count( ) const noexcept            = 0;
+  virtual board_id_t           add_board(std::unique_ptr<board_i> board) = 0;
   // Plain C-style callback + opaque user_data, deliberately not std::function
   // or a capturing lambda: those cross the plugin/app ABI boundary as
   // type-erased objects whose manager/invoker code is compiled wherever the
   // callable is instantiated (i.e. inside the plugin's .so). If such an
   // object outlives dlclose()-ing that plugin, destroying or invoking it
   // jumps into unmapped memory. user_data carries per-call context instead.
-  using board_manipulation_func_t                                              = void (*)(void* user_data, board_id_t, board_i&);
+  using board_manipulation_func_t                                                  = void (*)(void* user_data, board_id_t, board_i&);
   virtual void     for_each_board(board_manipulation_func_t func, void* user_data) = 0;
-  virtual board_i& board(board_id_t board_id)                     = 0;
+  virtual board_i& board(board_id_t board_id)                                      = 0;
 
   virtual std::optional<client_id_t> add_new_client(board_id_t board_id)     = 0;
-  virtual std::optional<board_i&>                   board_for_client(client_id_t client_id) = 0;
+  virtual std::optional<board_i&>    board_for_client(client_id_t client_id) = 0;
 
   virtual std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
 

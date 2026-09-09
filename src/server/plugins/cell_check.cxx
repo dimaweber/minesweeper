@@ -23,8 +23,8 @@ plugin_api_i* api;
 constexpr std::string_view rest_resource_path = "cell/check";
 
 handler_result_t cell_check_handler (board_i& board, const parameter_map_t& params) {
-  const int x = std::get<int>(params.at("x"));
-  const int y = std::get<int>(params.at("y"));
+  const int x = std::get<int64_t>(params.at("x"));
+  const int y = std::get<int64_t>(params.at("y"));
 
   api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: x={}, y={}", x, y);
 

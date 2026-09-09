@@ -59,7 +59,6 @@ const char* description ( ) {
 }
 
 void init_plugin ([[maybe_unused]] plugin_api_i& api_iface) {
-
   api = &api_iface;
   api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
 

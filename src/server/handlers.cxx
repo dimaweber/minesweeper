@@ -62,8 +62,8 @@ handler_result_t board_fully_revealed_handler (board_i& board, [[maybe_unused]] 
 }
 
 handler_result_t cell_reveal_handler (board_i& board, const parameter_map_t& params) {
-  const int x = std::get<int>(params.at("x"));
-  const int y = std::get<int>(params.at("y"));
+  const int x = std::get<int64_t>(params.at("x"));
+  const int y = std::get<int64_t>(params.at("y"));
 
   const auto& coord = board.coord(x, y);
   if ( !coord ) {
@@ -117,8 +117,8 @@ handler_result_t cell_reveal_handler (board_i& board, const parameter_map_t& par
 }
 
 handler_result_t cell_flag_handler (board_i& board, const parameter_map_t& params) {
-  const int x = std::get<int>(params.at("x"));
-  const int y = std::get<int>(params.at("y"));
+  const int x = std::get<int64_t>(params.at("x"));
+  const int y = std::get<int64_t>(params.at("y"));
 
   const auto coord = board.coord(x, y);
   if ( !coord ) {
