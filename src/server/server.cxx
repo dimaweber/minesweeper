@@ -364,6 +364,7 @@ void unload_plugins ( ) {
 }
 }  // namespace plugin
 
+namespace {
 [[nodiscard]]
 std::filesystem::path get_exe_directory ( ) noexcept {
   char              r[PATH_MAX];
@@ -372,7 +373,6 @@ std::filesystem::path get_exe_directory ( ) noexcept {
   return std::filesystem::path(path).parent_path( );
 }
 
-namespace {
 // Every path out of main() - normal return, `return EXIT_FAILURE` on any
 // error, an uncaught exception - must destroy `service` and `api` before
 // `plugins` (dlclose) runs, and `plugins`/`api` are both globals torn down
@@ -415,7 +415,7 @@ int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
   SPDLOG_DEBUG("Starting minesweeper server");
 
-  plugin::initialize_logger(  );
+  plugin::initialize_logger( );
 
   api = std::make_unique<plugin_api_t>( );
   shutdown_guard_t shutdown_guard;
@@ -429,10 +429,10 @@ int main (int argc, const char* argv[]) {
   bool                      no_http         = false;
   bool                      no_https        = false;
   std::filesystem::path     plugins_dir {get_exe_directory( ) / "plugins"};
-  std::filesystem::path     rsa_priv_key_path {api->rsa_priv_key_path( )};
-  std::filesystem::path     rsa_pub_key_path {api->rsa_pub_key_path( )};
-  std::filesystem::path     ssl_cert_path {api->ssl_cert_path( )};
-  std::filesystem::path     ssl_dh_path {api->ssl_dh_path( )};
+  std::filesystem::path     rsa_priv_key_path {api->http_api( )->rsa_priv_key_path( )};
+  std::filesystem::path     rsa_pub_key_path {api->http_api( )->rsa_pub_key_path( )};
+  std::filesystem::path     ssl_cert_path {api->http_api( )->ssl_cert_path( )};
+  std::filesystem::path     ssl_dh_path {api->http_api( )->ssl_dh_path( )};
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
@@ -461,10 +461,10 @@ int main (int argc, const char* argv[]) {
   CLI11_PARSE(app, argc, argv);
   spdlog::set_level(log_level);
 
-  api->set_rsa_priv_key_path(rsa_priv_key_path);
-  api->set_rsa_pub_key_path(rsa_pub_key_path);
-  api->set_ssl_cert_path(ssl_cert_path);
-  api->set_ssl_dh_path(ssl_dh_path);
+  api->http_api( )->set_rsa_priv_key_path(rsa_priv_key_path);
+  api->http_api( )->set_rsa_pub_key_path(rsa_pub_key_path);
+  api->http_api( )->set_ssl_cert_path(ssl_cert_path);
+  api->http_api( )->set_ssl_dh_path(ssl_dh_path);
 
   if constexpr ( plugin::server_support_plugins( ) ) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
@@ -482,9 +482,9 @@ int main (int argc, const char* argv[]) {
   }
 
   if ( create_ssl_cert ) {
-    if ( !std::filesystem::exists(api->ssl_cert_path( )) || !std::filesystem::exists(api->ssl_dh_path( )) ) {
+    if ( !std::filesystem::exists(api->http_api( )->ssl_cert_path( )) || !std::filesystem::exists(api->http_api( )->ssl_dh_path( )) ) {
       SPDLOG_INFO("Creating self-signed SSL certificate and Diffie-Hellman parameters");
-      if ( !create_self_signed_ssl_cert(api->ssl_cert_path( ), api->ssl_dh_path( ), api->rsa_priv_key_path( )) ) {
+      if ( !create_self_signed_ssl_cert(api->http_api( )->ssl_cert_path( ), api->http_api( )->ssl_dh_path( ), api->http_api( )->rsa_priv_key_path( )) ) {
         SPDLOG_ERROR("Failed to create self-signed SSL certificate and Diffie-Hellman parameters");
         return EXIT_FAILURE;
       }
@@ -508,9 +508,9 @@ int main (int argc, const char* argv[]) {
   if ( !no_https ) {
     const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
     ssl_settings->set_http_disabled(no_http);
-    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->rsa_priv_key_path( ))});
-    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->ssl_cert_path( ))});
-    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->ssl_dh_path( ))});
+    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->http_api( )->rsa_priv_key_path( ))});
+    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->http_api( )->ssl_cert_path( ))});
+    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->http_api( )->ssl_dh_path( ))});
     ssl_settings->set_port(ssl_port);
     settings->set_ssl_settings(ssl_settings);
   }

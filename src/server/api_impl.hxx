@@ -4,6 +4,7 @@
 
 #include "http_auth.hxx"
 #include "plugins/api.hxx"
+#include "rsa.hxx"
 
 struct client_context_t {
   board_id_t               board_id_;
@@ -48,13 +49,11 @@ private:
 };
 
 struct http_api_t : public http_api_i {
+  http_api_t ( );
+
   result_t<client_id_t> authorize_client (restbed::Session& session) const override {
     return http::auth::authorize_client(session);
   }
-};
-
-struct plugin_api_t : public plugin_api_i {
-  void log(log_level_t level, std::string_view msg) const override;
 
   std::filesystem::path rsa_priv_key_path ( ) const override {
     return rsa_priv_key_path_;
@@ -95,6 +94,19 @@ struct plugin_api_t : public plugin_api_i {
   const std::string& rsa_public_key ( ) const override {
     return rsa_public_key_;
   }
+
+private:
+  std::string rsa_private_key_;
+  std::string rsa_public_key_;
+
+  std::filesystem::path rsa_priv_key_path_ = "minesweeper_rsa.pem";
+  std::filesystem::path rsa_pub_key_path_  = "minesweeper_rsa.pub";
+  std::filesystem::path ssl_cert_path_     = "minesweeper.crt";
+  std::filesystem::path ssl_dh_path_       = "minesweeper_dh.pem";
+};
+
+struct plugin_api_t : public plugin_api_i {
+  void log(log_level_t level, std::string_view msg) const override;
 
   plugin_api_t( );
 
@@ -164,13 +176,6 @@ private:
   mutable std::mutex       boards_access_;
   http_api_t               http_api_;
   std::atomic<client_id_t> next_client_id_ {1};
-  std::string              rsa_private_key_;
-  std::string              rsa_public_key_;
-
-  std::filesystem::path rsa_priv_key_path_ = "minesweeper_rsa.pem";
-  std::filesystem::path rsa_pub_key_path_  = "minesweeper_rsa.pub";
-  std::filesystem::path ssl_cert_path_     = "minesweeper.crt";
-  std::filesystem::path ssl_dh_path_       = "minesweeper_dh.pem";
 
   sigslot::signal<> ready_to_load_resources_signal_;
 

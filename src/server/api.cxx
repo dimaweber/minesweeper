@@ -379,7 +379,6 @@ void plugin_api_t::log (log_level_t level, const std::string_view msg) const {
 }
 
 plugin_api_t::plugin_api_t ( ) {
-  std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 
 std::optional<client_id_t> plugin_api_t::add_new_client (board_id_t board_id) {
@@ -563,6 +562,10 @@ std::pair<std::string, headers_t> response_t::body (content_type_t content_type)
   add_header(http_header_t::content_type, content_type);
 
   return {body_, headers_};
+}
+
+http_api_t::http_api_t ( ) {
+  std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 
 void plugin_api_t::add_resource (std::string_view path, http_methods_t method, plugin_api_t::rest_handler_t handler) {

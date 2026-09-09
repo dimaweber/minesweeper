@@ -319,6 +319,19 @@ using result_t = std::expected<T, std::string>;
 struct http_api_i {
   virtual ~http_api_i( ) = default;
 
+  [[nodiscard]] virtual std::filesystem::path rsa_priv_key_path( ) const = 0;
+  [[nodiscard]] virtual std::filesystem::path rsa_pub_key_path( ) const  = 0;
+  [[nodiscard]] virtual std::filesystem::path ssl_cert_path( ) const     = 0;
+  [[nodiscard]] virtual std::filesystem::path ssl_dh_path( ) const       = 0;
+
+  virtual void set_rsa_priv_key_path(std::filesystem::path path) = 0;
+  virtual void set_rsa_pub_key_path(std::filesystem::path path)  = 0;
+  virtual void set_ssl_cert_path(std::filesystem::path path)     = 0;
+  virtual void set_ssl_dh_path(std::filesystem::path path)       = 0;
+
+  [[nodiscard]] virtual const std::string& rsa_private_key( ) const = 0;
+  [[nodiscard]] virtual const std::string& rsa_public_key( ) const  = 0;
+
   virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
 };
 
@@ -348,18 +361,6 @@ struct plugin_api_i {
     add_resource(resource.path, resource.method, resource.handler);
   }
 
-  [[nodiscard]] virtual std::filesystem::path rsa_priv_key_path( ) const = 0;
-  [[nodiscard]] virtual std::filesystem::path rsa_pub_key_path( ) const  = 0;
-  [[nodiscard]] virtual std::filesystem::path ssl_cert_path( ) const     = 0;
-  [[nodiscard]] virtual std::filesystem::path ssl_dh_path( ) const       = 0;
-
-  virtual void set_rsa_priv_key_path(std::filesystem::path path) = 0;
-  virtual void set_rsa_pub_key_path(std::filesystem::path path)  = 0;
-  virtual void set_ssl_cert_path(std::filesystem::path path)     = 0;
-  virtual void set_ssl_dh_path(std::filesystem::path path)       = 0;
-
-  [[nodiscard]] virtual const std::string& rsa_private_key( ) const = 0;
-  [[nodiscard]] virtual const std::string& rsa_public_key( ) const  = 0;
 
   [[nodiscard]] virtual size_t boards_count( ) const noexcept     = 0;
   virtual board_id_t           add_board(std::unique_ptr<board_i> board)          = 0;
