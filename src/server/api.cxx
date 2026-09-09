@@ -9,8 +9,11 @@
 
 #include <openssl/x509v3.h>
 
+#include <corvusoft/restbed/request.hpp>
 #include <corvusoft/restbed/session.hpp>
+#include <corvusoft/restbed/status_code.hpp>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <inc/logger.hxx>
 #include <nlohmann/json.hpp>
@@ -22,6 +25,53 @@
 #include "api_impl.hxx"
 #include "rsa.hxx"
 #include "types.hxx"
+
+namespace {
+// Parses resource.params from the request's query string: a missing
+// required parameter, or one that fails to parse as its declared type,
+// aborts with a message meant for send_error() rather than continuing with
+// a sentinel value - so a handler downstream never has to re-check "did I
+// actually get a valid x?" the way the ad hoc per-handler parsing used to.
+result_t<parameter_map_t> parse_params (restbed::Session& session, const std::vector<param_spec_t>& specs) {
+  const auto      request = session.get_request( );
+  parameter_map_t out;
+  for ( const auto& spec: specs ) {
+    const std::string raw = request->get_query_parameter(std::string(spec.name), "");
+    if ( raw.empty( ) ) {
+      if ( spec.required ) {
+        return std::unexpected(fmt::format("missing mandatory parameter {}", spec.name));
+      }
+      out.emplace(std::string(spec.name), spec.default_value);
+      continue;
+    }
+
+    switch ( spec.type ) {
+      using enum param_type_t;
+      case string: out.emplace(std::string(spec.name), raw); break;
+      case integer: {
+        std::errc  ec;
+        const auto value = wbr::str::num<int, wbr::str::num_match_t::full>(raw, ec);
+        if ( ec != std::errc { } ) {
+          return std::unexpected(fmt::format("invalid parameter {}", spec.name));
+        }
+        out.emplace(std::string(spec.name), value);
+        break;
+      }
+      case boolean: {
+        if ( raw == "true" || raw == "1" ) {
+          out.emplace(std::string(spec.name), true);
+        } else if ( raw == "false" || raw == "0" ) {
+          out.emplace(std::string(spec.name), false);
+        } else {
+          return std::unexpected(fmt::format("invalid parameter {}", spec.name));
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+}  // namespace
 
 // Recursive serialization of parameter_t values into each supported wire
 // format. Extracted out of response_t so the (array-aware) recursion lives
@@ -568,6 +618,54 @@ http_api_t::http_api_t ( ) {
   std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 
-void plugin_api_t::add_resource (std::string_view path, http_methods_t method, plugin_api_t::rest_handler_t handler) {
-  resources_.emplace_back(std::string(path), method, handler);
+void plugin_api_t::add_resource (std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params) {
+  resources_.push_back({std::string(path), method, handler, std::move(params)});
+}
+
+void plugin_api_t::add_resource (std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params) {
+  resources_.push_back({std::string(path), method, handler, std::move(params)});
+}
+
+void plugin_api_t::dispatch (restbed::Session& session, const resource_t& resource) {
+  const auto           request      = session.get_request( );
+  const std::string    format       = request->get_query_parameter("format", "json");
+  const content_type_t content_type = to_content_type(format);
+
+  response_t r {session};
+
+  const auto params = parse_params(session, resource.params);
+  if ( !params ) {
+    return r.send_error(restbed::BAD_REQUEST, content_type, params.error( ));
+  }
+
+  const handler_result_t result = std::visit(
+      [&] (auto handler) -> handler_result_t {
+        try {
+          if constexpr ( std::is_same_v<decltype(handler), board_handler_t> ) {
+            const auto id = http_api_.authorize_client(session);
+            if ( !id ) {
+              return std::unexpected(handler_error_t {restbed::UNAUTHORIZED, id.error( )});
+            }
+            const auto board = board_for_client(*id);
+            if ( !board ) {
+              return std::unexpected(handler_error_t {restbed::FORBIDDEN, "client not found"});
+            }
+            return handler(*board, *params);
+          } else {
+            return handler(*params);
+          }
+        } catch ( const std::exception& e ) {
+          return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, e.what( )});
+        }
+      },
+      resource.handler);
+
+  if ( !result ) {
+    return r.send_error(result.error( ).http_code, content_type, result.error( ).message);
+  }
+
+  for ( const auto& [key, value]: *result ) {
+    r.add_property(key, value);
+  }
+  r.send(restbed::OK, content_type);
 }

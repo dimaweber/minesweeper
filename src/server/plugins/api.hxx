@@ -336,12 +336,45 @@ struct http_api_i {
 };
 
 struct plugin_api_i {
-  using rest_handler_t = void (*)(restbed::Session&);
+  enum class param_type_t { string, integer, boolean };
+
+  struct param_spec_t {
+    std::string_view name;
+    param_type_t      type          = param_type_t::string;
+    bool              required      = false;
+    parameter_t       default_value = std::string { };
+  };
+
+  // A handler's result on success is the set of properties to send back to the
+  // client (folded into the response body by the host); on failure it's the
+  // HTTP status code plus a message - mirroring rest_api_response_i's
+  // send()/send_error() split without the handler ever touching a response
+  // object, restbed::Session, or content-type/format at all.
+  struct handler_error_t {
+    int         http_code;
+    std::string message;
+  };
+
+  using handler_result_t = std::expected<parameter_map_t, handler_error_t>;
+
+  // Two distinct handler shapes instead of one signature plus an
+  // "auth required" bool a plugin author could set wrong: a handler that
+  // takes a board_i& can only be registered through the board_handler_t
+  // overload of add_resource, and the host authenticates the caller and
+  // resolves *their* board before ever calling it - there is no path that
+  // hands a board_i& to a handler without going through authentication
+  // first. A resource that needs neither (or resolves its own board some
+  // other way, e.g. by an explicit id) uses simple_handler_t instead. The
+  // handler's own type is the declaration of what it needs, not a
+  // separately-settable (and separately-forgettable) flag.
+  using simple_handler_t = handler_result_t (*)(const parameter_map_t& params);
+  using board_handler_t  = handler_result_t (*)(board_i& board, const parameter_map_t& params);
 
   struct resource_t {
-    const std::string    path;
-    const http_methods_t method;
-    const rest_handler_t handler;
+    const std::string                                     path;
+    const http_methods_t                                  method;
+    const std::variant<simple_handler_t, board_handler_t> handler;
+    const std::vector<param_spec_t>                        params { };
   };
 
   enum log_level_t { trace, debug, info, warn, error, critical };
@@ -355,12 +388,12 @@ struct plugin_api_i {
     log(level, fmt::format(fmt, std::forward<Args>(args)...));
   }
 
-  virtual void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) = 0;
+  virtual void add_resource(std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params = { }) = 0;
+  virtual void add_resource(std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params = { })  = 0;
 
   void add_resource (const resource_t& resource) {
-    add_resource(resource.path, resource.method, resource.handler);
+    std::visit([&] (auto handler) { add_resource(resource.path, resource.method, handler, resource.params); }, resource.handler);
   }
-
 
   [[nodiscard]] virtual size_t boards_count( ) const noexcept     = 0;
   virtual board_id_t           add_board(std::unique_ptr<board_i> board)          = 0;
@@ -377,8 +410,7 @@ struct plugin_api_i {
   virtual std::optional<client_id_t> add_new_client(board_id_t board_id)     = 0;
   virtual std::optional<board_i&>                   board_for_client(client_id_t client_id) = 0;
 
-  virtual std::unique_ptr<rest_api_response_i> create_response(restbed::Session& session)                           = 0;
-  virtual std::unique_ptr<board_i>                             create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
+  virtual std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
 
   virtual void install_entrypoints(restbed::Service& service) = 0;
 
@@ -389,3 +421,8 @@ struct plugin_api_i {
   virtual void               on_ready_to_load_resources( )     = 0;
 #endif
 };
+
+using param_type_t     = plugin_api_i::param_type_t;
+using param_spec_t     = plugin_api_i::param_spec_t;
+using handler_error_t  = plugin_api_i::handler_error_t;
+using handler_result_t = plugin_api_i::handler_result_t;

@@ -110,7 +110,8 @@ struct plugin_api_t : public plugin_api_i {
 
   plugin_api_t( );
 
-  void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler) override;
+  void add_resource(std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params) override;
+  void add_resource(std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params) override;
 
   size_t boards_count ( ) const noexcept override {
     const std::scoped_lock lock(boards_access_);
@@ -151,16 +152,12 @@ struct plugin_api_t : public plugin_api_i {
 #if USE_PALSIGSLOT
     on_ready_to_load_resources( );
 #endif
-    for ( const auto& [path, method, handler]: resources_ ) {
-      const auto resource = std::make_shared<restbed::Resource>( );
-      resource->set_path(path);
-      resource->set_method_handler(to_string<const char*>(method), [handler] (SessionPtr session) { return handler(*session); });
-      service.publish(resource);
+    for ( const auto& res: resources_ ) {
+      const auto restbed_resource = std::make_shared<restbed::Resource>( );
+      restbed_resource->set_path(res.path);
+      restbed_resource->set_method_handler(to_string<const char*>(res.method), [this, res] (SessionPtr session) { dispatch(*session, res); });
+      service.publish(restbed_resource);
     }
-  }
-
-  std::unique_ptr<rest_api_response_i> create_response (restbed::Session& session) override {
-    return std::make_unique<response_t>(session);
   }
 
   std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) override;
@@ -180,4 +177,11 @@ private:
   sigslot::signal<> ready_to_load_resources_signal_;
 
   std::vector<resource_t> resources_;
+
+  // Parses `resource.params` from the query string (400 on a missing
+  // required/invalid-typed one), authenticates and resolves the caller's
+  // board when `resource.handler` is a board_handler_t (401/403 on
+  // failure), invokes the handler, and converts its handler_result_t into a
+  // sent response - the boilerplate every handler used to repeat by hand.
+  void dispatch(restbed::Session& session, const resource_t& resource);
 };

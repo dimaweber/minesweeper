@@ -2,10 +2,10 @@
 
 #include "plugins/api.hxx"
 
-void session_new_handler(restbed::Session& session);
-void board_size_handler(restbed::Session& session);
-void board_bombs_handler(restbed::Session& session);
-void board_fully_revealed_handler(restbed::Session& session);
-void cell_reveal_handler(restbed::Session& session);
-void cell_flag_handler(restbed::Session& session);
-void board_check_handler(restbed::Session& session);
+handler_result_t session_new_handler(const parameter_map_t& params);
+handler_result_t board_size_handler(board_i& board, const parameter_map_t& params);
+handler_result_t board_bombs_handler(board_i& board, const parameter_map_t& params);
+handler_result_t board_fully_revealed_handler(board_i& board, const parameter_map_t& params);
+handler_result_t cell_reveal_handler(board_i& board, const parameter_map_t& params);
+handler_result_t cell_flag_handler(board_i& board, const parameter_map_t& params);
+handler_result_t board_check_handler(board_i& board, const parameter_map_t& params);

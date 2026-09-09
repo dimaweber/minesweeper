@@ -1,8 +1,6 @@
 #include <fmt/format.h>
 #include <fmt/std.h>
 
-#include <corvusoft/restbed/request.hpp>
-#include <corvusoft/restbed/status_code.hpp>
 #include <memory>
 #include <sigslot/signal.hpp>
 
@@ -33,20 +31,13 @@ void collect_board (void* user_data, board_id_t board_id, board_i& board) {
   boards.emplace_back(board_info);
 }
 
-void boards_list_handler (restbed::Session& session) {
+handler_result_t boards_list_handler ([[maybe_unused]] const parameter_map_t& params) {
   api->log(plugin_api_i::log_level_t::debug, "boards_list_handler called");
-  const auto        request = session.get_request( );
-  const std::string format  = request->get_query_parameter("format", "json");
-
-  const content_type_t content_type = to_content_type(format);
-
-  auto r= api->create_response(session);
 
   parameter_list_t boards;
   api->for_each_board(collect_board, &boards);
 
-  r->add_property("boards", boards);
-  return r->send(restbed::OK, content_type);
+  return parameter_map_t {{"boards", boards}};
 }
 
 void install_resource ( ) {
