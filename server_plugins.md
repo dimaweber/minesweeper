@@ -338,8 +338,12 @@ int  operator[](size_t index) const noexcept;         // 0=x, 1=y
 std::string dim_name(int i) const noexcept;            // "x"/"y" — for building responses generically
 ```
 
-**RSA/SSL paths** (rarely needed by plugins; used internally for JWT signing/HTTPS):
+**RSA/SSL paths** (rarely needed by plugins; used internally for JWT signing/HTTPS) live
+on `http_api_i`, not directly on `plugin_api_i` — reach them through `http_api()`:
 ```cpp
+http_api_i* http_api( ); // on plugin_api_i
+
+// on http_api_i:
 std::filesystem::path rsa_priv_key_path( ) const;
 std::filesystem::path rsa_pub_key_path( ) const;
 std::filesystem::path ssl_cert_path( ) const;
@@ -347,6 +351,10 @@ std::filesystem::path ssl_dh_path( ) const;
 const std::string&    rsa_private_key( ) const;
 const std::string&    rsa_public_key( ) const;
 ```
+`http_api_i` also has the `set_*` counterparts of the four paths above (the host applies
+CLI-configured paths through them at startup) and `authorize_client(restbed::Session&)` —
+used internally by the host's dispatch to implement `board_handler_t`'s auth step, not
+something a plugin handler calls itself (see "The two handler shapes" above).
 
 ## Why references and function pointers, not `shared_ptr`/`std::function`
 
