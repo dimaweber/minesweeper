@@ -7,8 +7,12 @@ that contributes new REST resources to the `server` binary. For the REST API its
 Plugins are loaded at runtime via `dlopen`, and only ever see the small, fully virtual
 interface declared in `src/server/plugins/api.hxx`. They never link against or include
 server-internal headers (`handlers.hxx`, `http_auth.hxx`, `api_impl.hxx`) — everything a
-plugin needs (creating responses, looking up boards, authorizing a client, logging,
-registering resources) goes through the `addon_api_i` object handed to it at load time.
+plugin needs (looking up boards, logging, registering resources) goes through the
+`plugin_api_i` object handed to it at load time. A plugin handler never sees a
+`restbed::Session`, builds a response object, or calls an auth function itself — it
+declares what it needs (a board? which query params?) at registration, and the host
+does auth, param parsing, and response construction generically before/after calling it.
+See "Anatomy of a plugin" below for the two handler shapes this makes possible.
 
 ## Enabling / building plugin support
 
@@ -23,7 +27,7 @@ never calls `dlopen`, and `src/server/plugins/` isn't even added as a build subd
 
 Registering new resources also depends on `PalSigslot` being available
 (`find_package(PalSigslot)`); when found, the build gets `USE_PALSIGSLOT=1` and
-`addon_api_i` exposes the `ready_to_load_resources_signal()` used below to register
+`plugin_api_i` exposes the `ready_to_load_resources_signal()` used below to register
 resources at the right time. Existing plugins assume this is available.
 
 Each plugin is its own CMake shared-library target, built from
@@ -81,7 +85,7 @@ constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
 const char*           abi_tag( );
-void                  init_plugin(addon_api_i& api);
+void                  init_plugin(plugin_api_i& api);
 void                  unload_plugin( );
 }
 
@@ -94,16 +98,66 @@ ADDON_PLUGIN_ABI_TAG( )  // defines abi_tag() above - see api.hxx and "ABI compa
   load a plugin missing this export, or reporting a tag that doesn't match its own — see
   "ABI compatibility" below.
 * `init_plugin(api)` — called once at load time, only after the ABI check passes. Store
-  the pointer (typically in an anonymous-namespace file-local `addon_api_i*`, see both
+  the pointer (typically in an anonymous-namespace file-local `plugin_api_i*`, see both
   shipped plugins) and use it for everything else the plugin does.
 * `unload_plugin()` — called (if present, looked up via `dlsym`) when the server shuts
   down, before `dlclose`. This is not just optional cleanup: it's your only chance to
   disconnect anything you connected to `ready_to_load_resources_signal()` (see
-  `install_resource` below) and drop your own `addon_api_i*` *before* it's dangling.
+  `install_resource` below) and drop your own `plugin_api_i*` *before* it's dangling.
   `main()` guarantees `api` is still alive, and every plugin's `.so` is still mapped,
   when `unload_plugin()` runs — see "Why references and function pointers, not
   `shared_ptr`/`std::function`" below for why this matters and what can go wrong if you
   skip it.
+
+### The two handler shapes
+
+A handler is one of two distinct function-pointer types, not one signature plus a
+"does this need auth" flag:
+
+```cpp
+using simple_handler_t = handler_result_t (*)(const parameter_map_t& params);
+using board_handler_t  = handler_result_t (*)(board_i& board, const parameter_map_t& params);
+```
+
+`handler_result_t` is `std::expected<parameter_map_t, handler_error_t>`, where
+`handler_error_t` is `{int http_code; std::string message;}`. A handler never touches a
+`restbed::Session`, builds a response object, or picks a content type — it just returns
+the properties to send back on success, or a status code + message on failure, and the
+host converts that into a sent response.
+
+The two shapes are registered through two different `add_resource` overloads:
+
+```cpp
+void add_resource(std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params = { });
+void add_resource(std::string_view path, http_methods_t method, board_handler_t  handler, std::vector<param_spec_t> params = { });
+```
+
+Only `add_resource`'s `board_handler_t` overload authenticates the caller and resolves
+*their* board (via the same JWT-bearer-token flow `server_api.md` documents) before ever
+calling the handler — a `board_handler_t` handler is *always* called with an
+authenticated caller's own board, and there's no other way to obtain one. A resource
+that needs no per-client board (or resolves one itself some other way, e.g. `session/new`
+picking a board by an explicit id) uses `simple_handler_t` instead and gets no
+authentication step at all. There is no separately-settable "requires auth" bool to get
+wrong: the handler's own type is the declaration of what it needs, checked at compile
+time by which overload it's passed to.
+
+`params` declares the query parameters the host should parse before calling the handler:
+
+```cpp
+struct param_spec_t {
+  std::string_view name;
+  param_type_t      type          = param_type_t::string;  // string | integer | boolean
+  bool              required      = false;
+  parameter_t       default_value = std::string { };       // used when absent and not required
+};
+```
+
+The host parses every declared param from the query string before the handler runs: a
+missing `required` one, or one that fails to parse as its declared type, short-circuits
+straight to a 400 (`"missing mandatory parameter x"` / `"invalid parameter x"`) without
+ever calling the handler. A handler can then just do `std::get<int>(params.at("x"))`
+and trust that it's there and well-formed.
 
 ### Registering resources
 
@@ -116,7 +170,6 @@ your resources from the connected slot:
 #include <fmt/format.h>
 #include <fmt/std.h>
 
-#include <corvusoft/restbed/request.hpp>
 #include <corvusoft/restbed/status_code.hpp>
 #include <memory>
 #include <sigslot/signal.hpp>
@@ -128,24 +181,32 @@ constexpr const char* name( );
 constexpr const char* version( );
 constexpr const char* description( );
 const char*           abi_tag( );
-void                  init_plugin(addon_api_i& api);
+void                  init_plugin(plugin_api_i& api);
 void                  unload_plugin( );
 }
 
 ADDON_PLUGIN_ABI_TAG( )
 
 namespace {
-addon_api_i*                api;
+plugin_api_i*                api;
 constexpr std::string_view  rest_resource_path = "my/thing";
 
-void my_handler (restbed::Session& session) {
-  auto r = api->create_response(session);
-  r->add_property("status", "ok");
-  return r->send(restbed::OK, content_type_t::json);
+// board_handler_t: the host already authenticated the caller and resolved
+// "board" to be *their* board, and already validated "n" per the param_spec_t
+// below, by the time this runs.
+handler_result_t my_handler (board_i& board, const parameter_map_t& params) {
+  const int n = std::get<int>(params.at("n"));
+  if ( n > static_cast<int>(board.width( )) ) {
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "n out of range"});
+  }
+  return parameter_map_t {{"status", "ok"}, {"width", board.width( )}};
 }
 
 void install_resource ( ) {
-  api->add_resource(rest_resource_path, http_methods_t::GET, my_handler);
+  api->add_resource(rest_resource_path, http_methods_t::GET, my_handler,
+      {
+          {.name = "n", .type = param_type_t::integer, .required = true},
+  });
 }
 }  // namespace
 
@@ -153,7 +214,7 @@ constexpr const char* name ( ) { return "my_plugin"; }
 constexpr const char* version ( ) { return "1.0.0"; }
 constexpr const char* description ( ) { return "Does a thing"; }
 
-void init_plugin ([[maybe_unused]] addon_api_i& api_iface) {
+void init_plugin ([[maybe_unused]] plugin_api_i& api_iface) {
   api = &api_iface;
   api->ready_to_load_resources_signal( ).connect(install_resource);
 }
@@ -164,12 +225,13 @@ void unload_plugin ( ) {
 }
 ```
 
-Handlers have the signature `void(restbed::Session&)`, same as built-in handlers — a
-plain reference, not a `shared_ptr`.
+See `src/server/plugins/boards_list.cxx` for the simplest possible `simple_handler_t`
+(no params, no board) and `src/server/plugins/cell_check.cxx` for a fuller
+`board_handler_t` example.
 
-## The `addon_api_i` object
+## The `plugin_api_i` object
 
-Everything a plugin can do goes through the `addon_api_i` interface
+Everything a plugin can do goes through the `plugin_api_i` interface
 (`src/server/plugins/api.hxx`). The relevant surface for plugin authors:
 
 **Logging**
@@ -179,41 +241,12 @@ void log(log_level_t level, std::string_view msg) const;
 void log(log_level_t level, fmt::format_string<Args...> fmt, Args&&... args) const; // fmt overload
 ```
 
-**Registering resources**
-```cpp
-using rest_handler_t = void (*)(restbed::Session&);
-void add_resource(std::string_view path, http_methods_t method, rest_handler_t handler);
-```
-`handler` is a plain function pointer, not `std::function` — see "Why references and
-function pointers" below. (Only call `add_resource` from a slot connected to
-`ready_to_load_resources_signal()`, see above.)
-
-**Building a response** — `create_response(session)` returns a `std::unique_ptr<rest_api_response_i>`:
-```cpp
-rest_api_response_i& add_property(const std::string& key, parameter_t value); // chainable
-void send(int http_code, content_type_t content_type);
-void send_error(int http_code, content_type_t content_type, const std::string& msg);
-```
-`parameter_t` is a recursive variant (`string`/`int`/`uint`/`long`/`ulong`/`bool`/
-`parameter_list_t`/`parameter_map_t`) — see the "Response format" section in
-`server_api.md` for how arrays/maps get serialized across json/yaml/xml. Use
-`request->get_query_parameter(name, default)` (a plain restbed API call on
-`session.get_request()`) to read query parameters, and
-`to_content_type(request->get_query_parameter("format", "json"))` to resolve the
-requested response format the same way built-in handlers do.
-
-**Authorizing the caller**
-```cpp
-http_api_i* http_api( ); // -> authorize_client(restbed::Session&) -> result_t<client_id_t>
-```
-`result_t<T>` is `std::expected<T, std::string>`. Standard pattern, matching every
-built-in handler:
-```cpp
-const auto id = api->http_api( )->authorize_client(session);
-if ( !id ) {
-  return r->send_error(restbed::UNAUTHORIZED, content_type, id.error( ));
-}
-```
+**Registering resources** — see "The two handler shapes" above for `simple_handler_t`/
+`board_handler_t`, `param_spec_t`, and `handler_result_t`/`handler_error_t`.
+`parameter_t` (used in both `params` and a handler's returned `parameter_map_t`) is a
+recursive variant (`string`/`int`/`uint`/`long`/`ulong`/`bool`/`parameter_list_t`/
+`parameter_map_t`) — see the "Response format" section in `server_api.md` for how
+arrays/maps get serialized across json/yaml/xml.
 
 **Boards and clients**
 ```cpp
@@ -226,8 +259,13 @@ std::optional<client_id_t> add_new_client(board_id_t board_id);
 std::optional<board_i&>    board_for_client(client_id_t client_id);
 std::unique_ptr<board_i>   create_board(std::size_t width, std::size_t height, int bombs_count);
 ```
-`board_for_client` is what you call after `authorize_client` succeeds — it's the
-per-client independent copy of the board (see `server_api.md`'s session model).
+`board_for_client` is the per-client independent copy of the board (see
+`server_api.md`'s session model) — it's what the host resolves and hands your
+`board_handler_t` handler once authentication succeeds, so a plugin handler itself
+never needs to call it (or `authorize_client`) directly. `board`/`add_board`/
+`boards_count`/`for_each_board` are still there for code that needs a board by id
+rather than "the current client's board" (`session/new` and `boards_list` both work
+this way — see below).
 
 `for_each_board` takes a plain callback plus an opaque `user_data` pointer instead of a
 capturing lambda (again, see "Why references and function pointers" below) — thread
@@ -279,7 +317,7 @@ flag-count-satisfied neighbor without checking `is_boom()` first — can boom a 
 if the flags around the reference cell don't actually sit on all of its mines (see
 `src/server/plugins/cell_check.cxx`).
 
-**Cells** — `cell_i` (from `board->cell(coord)`):
+**Cells** — `cell_i` (from `board.cell(coord)`):
 ```cpp
 bool is_revealed( ) const;
 bool is_flag( ) const;
@@ -312,9 +350,10 @@ const std::string&    rsa_public_key( ) const;
 
 ## Why references and function pointers, not `shared_ptr`/`std::function`
 
-Every type on the `addon_api_i`/`http_api_i`/`board_i` boundary is a plain reference,
-raw pointer, or C-style function pointer (`rest_handler_t`, `board_manipulation_func_t`)
-— deliberately, not `std::shared_ptr` or `std::function`. This isn't style preference;
+Every type on the `plugin_api_i`/`http_api_i`/`board_i` boundary is a plain reference,
+raw pointer, or C-style function pointer (`simple_handler_t`, `board_handler_t`,
+`board_manipulation_func_t`) — deliberately, not `std::shared_ptr` or `std::function`.
+This isn't style preference;
 plugins are loaded with `dlopen` and unloaded with `dlclose`, and `dlclose` unmaps a
 plugin's code unconditionally, with no awareness that some object elsewhere might still
 reference it.
@@ -326,8 +365,8 @@ plugin-supplied callback means *inside the plugin's `.so`*. If that `std::functi
 object outlives `dlclose()`-ing the plugin — because it ended up stored in something
 the main app owns for longer, e.g. a registered REST resource or a signal connection —
 destroying or invoking it later jumps into unmapped memory. Likewise a
-`shared_ptr<addon_api_i>` handed to a plugin creates a second owner of the server's
-`addon_api_t`: if a plugin never releases its copy, the object can end up being destroyed
+`shared_ptr<plugin_api_i>` handed to a plugin creates a second owner of the server's
+`plugin_api_t`: if a plugin never releases its copy, the object can end up being destroyed
 from *inside* some other plugin's `dlclose`, after the first plugin's code is already
 gone but before the object holding a connection into it is.
 
@@ -335,7 +374,7 @@ A plain function pointer has none of this: it's just an address, with no manager
 generated anywhere, so it stays valid as data as long as you don't call through it after
 the pointee is unmapped. That's why `unload_plugin()` matters — it's your one guaranteed
 window (while `api` and every plugin's `.so`, including your own, are still mapped) to
-disconnect from `ready_to_load_resources_signal()` and drop your `addon_api_i*`, so that
+disconnect from `ready_to_load_resources_signal()` and drop your `plugin_api_i*`, so that
 nothing plugin-side survives to be touched after any `.so` is closed. `main()` on its
 side destroys `service` and calls `unload_plugin()` on every plugin *before* dlclosing
 any of them, and only destroys `api` itself afterwards — see `shutdown_guard_t` in
@@ -345,7 +384,7 @@ exception from a failed `bind()`, needs the same ordering guarantee).
 
 ## ABI compatibility
 
-A virtual C++ interface like `addon_api_i` only has a well-defined, agreed memory
+A virtual C++ interface like `plugin_api_i` only has a well-defined, agreed memory
 layout between binaries built with the same compiler, the same standard library
 (never mix libstdc++ and libc++), the same `_GLIBCXX_USE_CXX11_ABI` setting, and the
 same version of `api.hxx` itself (it's a header, and `sigslot::signal<>` inside it is
@@ -368,7 +407,7 @@ unit. The server computes the same tag for itself and compares before calling
 naming both tags and skips the plugin entirely, the same way it already does for a
 plugin missing `init_plugin()`.
 
-**Bump `ADDON_API_ABI_VERSION`** (in `api.hxx`) whenever `addon_api_i`/`http_api_i`/
+**Bump `ADDON_API_ABI_VERSION`** (in `api.hxx`) whenever `plugin_api_i`/`http_api_i`/
 `board_i`/`cell_i` change shape in a way that would make an already-built plugin call
 the wrong vtable slot — reordering, removing, or changing the signature of an existing
 virtual method. Appending a new virtual method at the end doesn't need a bump on its
@@ -391,12 +430,14 @@ back to `inline` later.
 ## Shipped examples
 
 * **`boards_list`** (`src/server/plugins/boards_list.cxx`) — `GET /boards/list`. The
-  simplest possible plugin: no auth, iterates `for_each_board` (via the
-  callback+`user_data` pattern above) and reports `board_id`/`width`/`height` for each.
+  simplest possible plugin: a `simple_handler_t` with no declared params, iterates
+  `for_each_board` (via the callback+`user_data` pattern above) and reports
+  `board_id`/`width`/`height` for each.
 * **`cell_check`** (`src/server/plugins/cell_check.cxx`) — `POST /cell/check`. Full
-  example of an authenticated, parameterized handler that reads `x`/`y` query params,
-  authorizes the caller, validates board/cell state, and calls `board->reveal_cells(...)`
-  per qualifying neighbor.
+  example of a `board_handler_t` with two required `integer` params (`x`/`y`): the host
+  has already authenticated the caller, resolved their board, and validated `x`/`y` are
+  present and numeric by the time the handler runs, which then validates board/cell
+  state and calls `board.reveal_cells(...)` per qualifying neighbor.
 
 Both are fully documented from the client's perspective in `server_api.md`.
 
@@ -404,12 +445,18 @@ Both are fully documented from the client's perspective in `server_api.md`.
 
 * Only include `"api.hxx"` (i.e. `src/server/plugins/api.hxx`) — never reach into
   `handlers.hxx`, `http_auth.hxx`, or `api_impl.hxx`. If something a plugin needs isn't
-  exposed on `addon_api_i`/`http_api_i`/`board_i`/`cell_i`, that's a gap in those
+  exposed on `plugin_api_i`/`http_api_i`/`board_i`/`cell_i`, that's a gap in those
   interfaces to fix, not a reason to link against server internals.
-* Keep a plugin's own `addon_api_i*` in an anonymous namespace, matching both shipped
-  plugins — never `std::shared_ptr<addon_api_i>` (see above for why).
+* Register with the handler shape matching what you actually need — `board_handler_t`
+  if you need the caller's authenticated board, `simple_handler_t` otherwise — rather
+  than declaring one and then manually resolving (or skipping) auth inside the handler
+  body. Declare every query param the handler needs via `param_spec_t` at registration
+  instead of parsing the query string by hand; the host validates presence/type for you
+  before the handler ever runs.
+* Keep a plugin's own `plugin_api_i*` in an anonymous namespace, matching both shipped
+  plugins — never `std::shared_ptr<plugin_api_i>` (see above for why).
 * Always define `unload_plugin()`, disconnecting anything you connected to
-  `ready_to_load_resources_signal()` and then nulling your `addon_api_i*`, matching both
+  `ready_to_load_resources_signal()` and then nulling your `plugin_api_i*`, matching both
   shipped plugins. Skipping it leaves a live connection into your `.so` for `api`'s
   signal to hold past your own `dlclose`.
 * Prefer lowercase error messages (`"can't reveal flagged cell"`) to match the built-in
