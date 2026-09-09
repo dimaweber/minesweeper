@@ -290,7 +290,7 @@ struct parameter_bytestream_t {
   }
 
   bool serialize (const parameter_t& param) {
-    if ( offset_ >= buffer_size_ ) {
+    if ( (size_t)offset_ >= buffer_size_ ) {
       return false;
     }
     if ( std::holds_alternative<std::string>(param) ) {
@@ -299,16 +299,16 @@ struct parameter_bytestream_t {
     if ( std::holds_alternative<int64_t>(param) ) {
       return write(std::get<int64_t>(param));
     }
-    if (std::holds_alternative<uint64_t>(param)) {
+    if ( std::holds_alternative<uint64_t>(param) ) {
       return write(static_cast<int64_t>(std::get<uint64_t>(param)));
     }
     if ( std::holds_alternative<bool>(param) ) {
       return write(std::get<bool>(param));
     }
-    if (std::holds_alternative<parameter_list_t>(param)) {
+    if ( std::holds_alternative<parameter_list_t>(param) ) {
       return write(std::get<parameter_list_t>(param));
     }
-    if (std::holds_alternative<parameter_map_t>(param)) {
+    if ( std::holds_alternative<parameter_map_t>(param) ) {
       return write(std::get<parameter_map_t>(param));
     }
     return false;
@@ -318,21 +318,73 @@ struct parameter_bytestream_t {
     const type_tag tag = read_tag( );
     switch ( tag ) {
       using enum type_tag;
-      case string:   return read_string( );
-      case number:  return read_integer( );
-      case boolean:  return read_bool( );
-      case vector:   return read_vector(  ) ;
-      case map:      return read_map(  );
+      case null:        return { };
+      case string1:     return read_string(1);
+      case string2:     return read_string(2);
+      case string3:     return read_string(3);
+      case string4:     return read_string(4);
+      case string5:     return read_string(5);
+      case string6:     return read_string(6);
+      case string7:     return read_string(7);
+      case string8:     return read_string(8);
+      case number1:     return read_integer(1);
+      case number2:     return read_integer(2);
+      case number3:     return read_integer(3);
+      case number4:     return read_integer(4);
+      case number5:     return read_integer(5);
+      case number6:     return read_integer(6);
+      case number7:     return read_integer(7);
+      case number8:     return read_integer(8);
+      case neg_number1: return -read_integer(1);
+      case neg_number2: return -read_integer(2);
+      case neg_number3: return -read_integer(3);
+      case neg_number4: return -read_integer(4);
+      case neg_number5: return -read_integer(5);
+      case neg_number6: return -read_integer(6);
+      case neg_number7: return -read_integer(7);
+      case neg_number8: return -read_integer(8);
+      case boolean:     return read_bool( );
+      case vector:      return read_vector( );
+      case map:         return read_map( );
     }
     return { };
   }
 
 private:
-  enum type_tag : uint8_t { string, number,boolean, vector, map };
+  enum type_tag : uint8_t {
+    null,
+    string1,
+    string2,
+    string3,
+    string4,
+    string5,
+    string6,
+    string7,
+    string8,
+    number1,
+    number2,
+    number3,
+    number4,
+    number5,
+    number6,
+    number7,
+    number8,
+    neg_number1,
+    neg_number2,
+    neg_number3,
+    neg_number4,
+    neg_number5,
+    neg_number6,
+    neg_number7,
+    neg_number8,
+    boolean,
+    vector,
+    map,
+  };
 
   std::byte* buffer_;
   size_t     buffer_size_;
-  size_t     offset_ {0};
+  off_t      offset_ {0};
 
   template<typename T>
   T* as_ptr (std::byte* ptr) {
@@ -374,7 +426,7 @@ private:
 
   template<typename T>
   size_t write_len ( ) {
-    return write_len(sizeof (T));
+    return write_len(sizeof(T));
   }
 
   template<typename T>
@@ -394,8 +446,59 @@ private:
       return 0;
     }
 
-    write_tag(type_tag::string);
-    write_len(str_size);
+    if ( str_size < 0x100 ) {
+      write_tag(type_tag::string1);
+      put_byte(byte(str_size, 0));
+    } else if ( str_size < 0x1'00'00 ) {
+      write_tag(type_tag::string2);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+    } else if ( str_size < 0x1'00'00'00 ) {
+      write_tag(type_tag::string3);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+    } else if ( str_size < 0x1'00'00'00'00 ) {
+      write_tag(type_tag::string4);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+      put_byte(byte(str_size, 3));
+    } else if ( str_size < 0x1'00'00'00'00'00 ) {
+      write_tag(type_tag::string5);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+      put_byte(byte(str_size, 3));
+      put_byte(byte(str_size, 4));
+    } else if ( str_size < 0x1'00'00'00'00'00'00 ) {
+      write_tag(type_tag::string6);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+      put_byte(byte(str_size, 3));
+      put_byte(byte(str_size, 4));
+      put_byte(byte(str_size, 5));
+    } else if ( str_size < 0x1'00'00'00'00'00'00'00 ) {
+      write_tag(type_tag::string7);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+      put_byte(byte(str_size, 3));
+      put_byte(byte(str_size, 4));
+      put_byte(byte(str_size, 5));
+      put_byte(byte(str_size, 6));
+    } else {
+      write_tag(type_tag::string8);
+      put_byte(byte(str_size, 0));
+      put_byte(byte(str_size, 1));
+      put_byte(byte(str_size, 2));
+      put_byte(byte(str_size, 3));
+      put_byte(byte(str_size, 4));
+      put_byte(byte(str_size, 5));
+      put_byte(byte(str_size, 6));
+      put_byte(byte(str_size, 7));
+    }
 
     std::copy_n(str.data( ), str_size, as_ptr<char>( ));
     offset_ += str_size;
@@ -403,16 +506,134 @@ private:
     return offset_;
   }
 
+  void put_byte (uint8_t byte) {
+    if ( offset_ + sizeof(uint8_t) > buffer_size_ ) {
+      return;
+    }
+    as_ref<uint8_t>( ) = byte;
+    offset_ += sizeof(uint8_t);
+  }
+
+  [[nodiscard]] uint8_t byte (uint64_t v, int byte_index) {
+    return static_cast<uint8_t>((v >> (byte_index * 8)) & 0xFF);
+  }
+
   template<std::integral T>
   size_t write (T val) {
     if ( offset_ + sizeof(type_tag) + sizeof(T) > buffer_size_ ) {
       return 0;
     }
-    write_tag(type_tag::number);
-
-    as_ref<int64_t>( ) = val;
-    offset_ += sizeof(T);
-
+    if ( val >= 0 ) {
+      const uint64_t v = static_cast<uint64_t>(val);
+      if ( v < 0x1'00 ) {
+        write_tag(type_tag::number1);
+        put_byte(byte(v, 0));
+      } else if ( val < 0x1'00'00 ) {
+        write_tag(type_tag::number2);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+      } else if ( val < 0x1'00'00'00 ) {
+        write_tag(type_tag::number3);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+      } else if ( val < 0x1'00'00'00'00 ) {
+        write_tag(type_tag::number4);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+      } else if ( val < 0x1'00'00'00'00'00 ) {
+        write_tag(type_tag::number5);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+      } else if ( val < 0x1'00'00'00'00'00'00 ) {
+        write_tag(type_tag::number6);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+      } else if ( val < 0x1'00'00'00'00'00'00'00 ) {
+        write_tag(type_tag::number7);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+        put_byte(byte(v, 6));
+      } else {
+        write_tag(type_tag::number8);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+        put_byte(byte(v, 6));
+        put_byte(byte(v, 7));
+      }
+    } else {
+      const uint64_t v = static_cast<uint64_t>(-val);
+      if ( v < 0x1'00 ) {
+        write_tag(type_tag::neg_number1);
+        put_byte(byte(v, 0));
+      } else if ( v < 0x1'00'00 ) {
+        write_tag(type_tag::neg_number2);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+      } else if ( v < 0x1'00'00'00 ) {
+        write_tag(type_tag::neg_number3);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+      } else if ( v < 0x1'00'00'00'00 ) {
+        write_tag(type_tag::neg_number4);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+      } else if ( v < 0x1'00'00'00'00'00 ) {
+        write_tag(type_tag::neg_number5);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+      } else if ( v < 0x1'00'00'00'00'00'00 ) {
+        write_tag(type_tag::neg_number6);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+      } else if ( v < 0x1'00'00'00'00'00'00'00 ) {
+        write_tag(type_tag::neg_number7);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+        put_byte(byte(v, 6));
+      } else {
+        write_tag(type_tag::neg_number8);
+        put_byte(byte(v, 0));
+        put_byte(byte(v, 1));
+        put_byte(byte(v, 2));
+        put_byte(byte(v, 3));
+        put_byte(byte(v, 4));
+        put_byte(byte(v, 5));
+        put_byte(byte(v, 6));
+        put_byte(byte(v, 7));
+      }
+    }
     return offset_;
   }
 
@@ -427,10 +648,10 @@ private:
     return offset_;
   }
 
-  size_t write(const parameter_list_t& vec) {
+  size_t write (const parameter_list_t& vec) {
     write_tag(type_tag::vector);
     write_len(vec.size( ));
-    for (const auto& item: vec) {
+    for ( const auto& item: vec ) {
       if ( !serialize(item) ) {
         return 0;
       }
@@ -438,13 +659,11 @@ private:
     return offset_;
   }
 
-  size_t write(const parameter_map_t& m) {
+  size_t write (const parameter_map_t& m) {
     write_tag(type_tag::map);
     write_len(m.size( ));
-    for (const auto& [key, item]: m) {
-      write_len(key.size( ));
-      std::copy_n(key.data( ), key.size( ), as_ptr<char>( ));
-      offset_+= key.size( );
+    for ( const auto& [key, item]: m ) {
+      write(key);
       if ( !serialize(item) ) {
         return 0;
       }
@@ -464,17 +683,28 @@ private:
     return ret;
   }
 
-  std::string read_string ( ) {
-    const size_t           len = read_len( );
+  std::string read_string (int bytes) {
+    uint64_t len = 0;
+    for ( int i = 0; i < bytes; ++i ) {
+      len |= static_cast<uint64_t>(read_byte( )) << (i * 8);
+    }
     const std::string_view sv {as_ptr<char>( ), len};
     offset_ += len;
     return std::string {sv};
   }
 
+  uint8_t read_byte ( ) {
+    const uint8_t ret = as_ref<uint8_t>( );
+    offset_ += sizeof(uint8_t);
+    return ret;
+  }
+
   template<std::integral T = int64_t>
-  T read_integer ( ) {
-    const int64_t ret = as_ref<T>( );
-    offset_ += sizeof(int64_t);
+  T read_integer (size_t bytes) {
+    int64_t ret = 0;
+    for ( size_t i = 0; i < bytes; ++i ) {
+      ret |= static_cast<int64_t>(read_byte( )) << (i * 8);
+    }
     return static_cast<T>(ret);
   }
 
@@ -485,19 +715,33 @@ private:
   }
 
   parameter_list_t read_vector ( ) {
-    const size_t len = read_len( );
+    const size_t     len = read_len( );
     parameter_list_t vec;
     for ( size_t i = 0; i < len; ++i ) {
-      vec.push_back(deserialize(  ));
+      vec.push_back(deserialize( ));
     }
     return vec;
   }
 
   parameter_map_t read_map ( ) {
-    const size_t len = read_len( );
+    const size_t    len = read_len( );
     parameter_map_t m;
     for ( size_t i = 0; i < len; ++i ) {
-      const std::string key = read_string( );
+      const type_tag    tag = read_tag( );
+      const std::string key = [this] (type_tag e) {
+        switch ( e ) {
+          using enum type_tag;
+          case string1: return read_string(1);
+          case string2: return read_string(2);
+          case string3: return read_string(3);
+          case string4: return read_string(4);
+          case string5: return read_string(5);
+          case string6: return read_string(6);
+          case string7: return read_string(7);
+          case string8: return read_string(8);
+          default:      throw std::runtime_error("Invalid type tag for map key");
+        }
+      }(tag);
       m.emplace(key, deserialize( ));
     }
     return m;

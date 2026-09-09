@@ -1,22 +1,63 @@
 #include <gtest/gtest.h>
 
+#include <iostream>
+
 #include "../plugins/api.hxx"
 
 [[maybe_unused]] parameter_t             p;    // make sure parameter_t is defined and accessible
 [[maybe_unused]] parameter_bytestream_t* pbs;  // make sure parameter_bytestream_t is defined and accessible
 
+std::ostream& operator<< (std::ostream& os, const parameter_t& p) {
+  std::visit([&os] (const auto& v) {
+    using T = std::decay_t<decltype(v)>;
+    if constexpr ( std::is_same_v<T, parameter_list_t> ) {
+      os << "[";
+      for ( const auto& item: v ) {
+        os << item << ", ";
+      }
+      os << "]";
+    } else if constexpr ( std::is_same_v<T, parameter_map_t> ) {
+      os << "{";
+      for ( const auto& [key, item]: v ) {
+        os << key << ": " << item << ", ";
+      }
+      os << "}";
+    } else {
+      os << v;
+    }
+  }, p);
+  return os;
+}
+
 TEST (ParametersBitstream, Integers) {
-  const parameter_t          p_int = 42;
-  std::array<std::byte, 100> buffer;
-  buffer.fill(std::byte {0xfa});
+  for ( const auto i: std::initializer_list<int64_t> {
+            -0x08'00'00'12'0f'00'00'00,
+            -100,
+            -1,
+            0,
+            1,
+            42,
+            100,
+            1000,
+            10000,
+            0x7fffffff,
+            0x80000000,
+            0xffffffff,
+            0x7fbcd98ef012378LL,
+            0xfffffffeaffffffLL,
+        } ) {
+    const parameter_t          p_int = i;
+    std::array<std::byte, 100> buffer;
+    buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_int);
+    parameter_bytestream_t pbs_write(buffer);
+    pbs_write.serialize(p_int);
 
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
+    parameter_bytestream_t pbs_read(buffer);
+    const parameter_t      out = pbs_read.deserialize( );
 
-  EXPECT_EQ(out, p_int);
+    EXPECT_EQ(out, p_int);
+  }
 }
 
 TEST (ParametersBitstream, Strings) {
