@@ -16,16 +16,26 @@
 
 namespace envelope {
 
+// Whether, and how, wrap()/unwrap() go through base64 - a transport-framing
+// choice (does this need to be text-safe, e.g. embedded in JSON or a URL,
+// or can it be raw bytes on a binary socket), not a protective layer, which
+// is why - unlike compress/encrypt/sign - it isn't part of the header's
+// mask: the two sides of a conversation are expected to agree on this out
+// of band, the same way they agree on which keys to use.
+enum class base64_mode_t {
+  none,      // raw bytes in, raw bytes out - no text encoding at all.
+  standard,  // RFC 4648 §4: "+/" alphabet, "=" padding.
+  url_safe,  // RFC 4648 §5: "-_" alphabet, no padding - safe to drop directly
+             // into a URL, a cookie, or a JWT-style token without further
+             // escaping, which is the whole reason this variant exists.
+};
+
 // Which optional protective layers wrap() applies - and, self-described by
 // the header it writes, which ones unwrap() looks for. A receiver never
 // needs to separately know or repeat which layers a sender used; it only
 // needs the key(s) for whichever ones the header says were actually used.
 struct config_t {
-  // Whether wrap()/unwrap() go through base64 at all. Independent of the
-  // other three - it's a transport-framing choice (does this need to be
-  // text-safe, e.g. embedded in JSON, or can it be raw bytes on a binary
-  // socket), not a protective layer, so it isn't part of the header's mask.
-  bool base64 = true;
+  base64_mode_t base64 = base64_mode_t::standard;
 
   bool compress = false;
 

@@ -21,3 +21,7 @@ entry below, until this directory is extracted into its own repository.
 - GTest-based test suite (`tests/`), registered with the parent project's CTest run;
   see [`tests.md`](tests.md) for what it covers.
 - `readme.md`, `tests.md`, this changelog.
+- `config_t::base64` changed from `bool` to `base64_mode_t` (`none`/`standard`/
+  `url_safe`), adding RFC 4648 §5 "base64url" support (`-`/`_` alphabet, no padding —
+  the convention JWTs/URLs/cookies use) alongside the original RFC 4648 §4 alphabet.
+  `base64_decode()` accepts padded or unpadded input for either alphabet.

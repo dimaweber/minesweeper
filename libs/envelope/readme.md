@@ -14,7 +14,7 @@ cfg.encrypt     = true;
 cfg.encrypt_key = my_32_byte_key;   // AES-256
 cfg.sign        = true;
 cfg.sign_key    = my_sign_key;      // HMAC-SHA256, any length
-cfg.base64      = true;             // text-safe output, e.g. for a JSON field
+cfg.base64      = envelope::base64_mode_t::url_safe;  // or standard, or none for raw bytes
 
 const envelope::envelope_t env(cfg);
 
@@ -64,8 +64,8 @@ the public surface is one class.
   4B      1B    ...       32B, present iff mask's sign bit is set
 ```
 
-then base64-encoded as a whole, if `config_t::base64` is set. `payload`'s own shape
-depends on the mask:
+then base64-encoded as a whole (unless `config_t::base64` is `base64_mode_t::none`).
+`payload`'s own shape depends on the mask:
 
 ```
 compressed?( encrypted?( raw bytes ) )
@@ -76,6 +76,20 @@ compressed?( encrypted?( raw bytes ) )
 requiring the caller to reconfigure the same toggles used at encode time. Only the
 *keys* for whichever layers the mask names need to be supplied out of band; the choice
 of layers travels with the data.
+
+`base64_mode_t` is *not* part of the mask, and is the one setting `unwrap()` doesn't
+recover from the wire: whether (and which alphabet of) base64 was used is a
+transport-framing choice the two sides are expected to agree on out of band, same as
+which keys to use.
+
+- `none` — raw bytes in, raw bytes out.
+- `standard` — RFC 4648 §4: `+`/`/` alphabet, `=` padding.
+- `url_safe` — RFC 4648 §5: `-`/`_` alphabet, no padding. Safe to drop directly into a
+  URL, a cookie, or a JWT-style token without further escaping.
+
+`unwrap()` accepts padded or unpadded input for either alphabet — there's exactly one
+canonical decoded value for a given (unpadded) character sequence either way, so being
+lenient about padding on the way in costs nothing.
 
 ## Algorithms
 

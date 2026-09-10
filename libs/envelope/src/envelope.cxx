@@ -19,6 +19,12 @@ constexpr uint8_t mask_encrypt  = 1u << 1;
 constexpr uint8_t mask_sign     = 1u << 2;
 
 constexpr size_t header_size = magic_bytes.size( ) + 1;  // magic + mask byte
+
+// base64_mode_t::none never reaches here - callers only call this for the
+// two modes that are actually base64.
+constexpr detail::base64_alphabet_t alphabet_for (base64_mode_t mode) {
+  return mode == base64_mode_t::url_safe ? detail::base64_alphabet_t::url_safe : detail::base64_alphabet_t::standard;
+}
 }  // namespace
 
 envelope_t::envelope_t (config_t config) : config_(std::move(config)) {
@@ -64,16 +70,16 @@ std::expected<std::vector<std::byte>, std::string> envelope_t::wrap (std::span<c
     framed.insert(framed.end( ), tag.begin( ), tag.end( ));
   }
 
-  if ( config_.base64 ) {
-    return detail::base64_encode(framed);
+  if ( config_.base64 != base64_mode_t::none ) {
+    return detail::base64_encode(framed, alphabet_for(config_.base64));
   }
   return framed;
 }
 
 std::expected<std::vector<std::byte>, std::string> envelope_t::unwrap (std::span<const std::byte> data) const {
   std::vector<std::byte> framed;
-  if ( config_.base64 ) {
-    auto decoded = detail::base64_decode(data);
+  if ( config_.base64 != base64_mode_t::none ) {
+    auto decoded = detail::base64_decode(data, alphabet_for(config_.base64));
     if ( !decoded ) {
       return std::unexpected(std::move(decoded.error( )));
     }
