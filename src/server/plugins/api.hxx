@@ -4,6 +4,7 @@
 
 #include <corvusoft/restbed/service.hpp>
 #include <corvusoft/restbed/session.hpp>
+#include <corvusoft/restbed/status_code.hpp>
 #include <expected>
 #include <filesystem>
 #include <functional>
@@ -286,6 +287,13 @@ template<typename T>
 using result_t = std::expected<T, std::string>;
 
 struct parameter_bytestream_t {
+  /// @todo: we can add optional
+  ///        - zip/unzip to store/load (can even add flag for zipped/unzipped to header so unzip done automatically)
+  ///        - add optional checksum to store/load (can even add flag for checksum to header so verify done automatically)
+  ///        - sha256 signature to confirm data integrity (can even add flag for signature to header so verify done automatically)
+  ///        - unwind functionality (with stack) so failure will leave buffer in prev state (we don't it now, but actually this will
+  ///           allow to use same buffer for load/store concurrently - when reading of non-finished write will rewind its offset and retry after write is finished) -- usefull for
+  ///           partial reads -- we don't support it now, so this feature is not needed, but can be added later if needed)
   parameter_bytestream_t (std::byte* buffer, size_t buffer_size) : buffer_(buffer), buffer_size_(buffer_size) {
   }
 
@@ -299,6 +307,13 @@ struct parameter_bytestream_t {
   // recursive grammar itself - serialize()/deserialize() stay unaware it
   // exists.
   static constexpr uint8_t wire_version = 1;
+
+  // Bytes actually written/consumed so far - lets a caller that store()d
+  // into a scratch buffer larger than it needed find out how much of it
+  // is real payload.
+  [[nodiscard]] size_t size ( ) const noexcept {
+    return static_cast<size_t>(offset_);
+  }
 
   // Public entry points: store()/load() are the only way in or out of a
   // buffer, and neither ever lets an exception reach the caller - every
@@ -424,8 +439,8 @@ private:
   template<std::convertible_to<std::string> T>
   void write (const T& str) {
     const size_t str_size = str.size( );
-    check_capacity(sizeof(type_tag) + sizeof(size_t) + str_size);
-
+    check_capacity(sizeof(type_tag) + sizeof(size_t) + str_size); /// @todo: same as with integers write
+                                                                         ///         this checks for longer buffer
     if ( str_size < 0x100 ) {
       write_tag(type_tag::string1);
       put_byte(byte(str_size, 0));
@@ -496,7 +511,11 @@ private:
 
   template<std::integral T>
   void write (T val) {
-    check_capacity(sizeof(type_tag) + sizeof(T));
+    check_capacity(sizeof(type_tag) + sizeof(T)); /// @todo: this checks for bigger space
+                                                         ///        since we use numberX now instead
+                                                         ///        of always int64 -- for example storing
+                                                         ///        int64_t(1) will req 1 byte only, while
+                                                         ///        check use full 8-byte size
     if ( val >= 0 ) {
       const uint64_t v = static_cast<uint64_t>(val);
       if ( v < 0x1'00 ) {
@@ -652,6 +671,10 @@ private:
     }
   }
 
+  /// @todo: there is a bug with check_capacity for reads
+  ///         since we have only current read position and full buffer size
+  ///         we check against full buffer size, but actual data could take
+  ///         only part of buffer, thus check will return true while read return trash
   size_t read_len ( ) {
     const type_tag tag = read_tag( );
     switch ( tag ) {
@@ -858,8 +881,21 @@ struct plugin_api_i {
   // other way, e.g. by an explicit id) uses simple_handler_t instead. The
   // handler's own type is the declaration of what it needs, not a
   // separately-settable (and separately-forgettable) flag.
-  using simple_handler_t = handler_result_t (*)(const parameter_map_t& params);
-  using board_handler_t  = handler_result_t (*)(board_i& board, const parameter_map_t& params);
+  //
+  // Both shapes speak strictly in bytes: params_buf/params_len is a
+  // store()d parameter_t (a parameter_map_t at the top level) prepared by
+  // the host; the handler store()s its own handler_result_t - wrapped via
+  // handler_wire::to_wire() - into out_buf (out_cap bytes) and returns how
+  // many bytes it wrote, or 0 on any failure (a valid store() is always
+  // at least 1 byte, so 0 is an unambiguous sentinel). No parameter_t,
+  // parameter_map_t, or std::string crosses this function-pointer call as
+  // a C++ object - a plugin author still writes an ordinary
+  // parameter_map_t-in/handler_result_t-out function, and registers it
+  // through simple_handler_adapter<Handler>/board_handler_adapter<Handler>
+  // (below), which does the store()/load() at this boundary so no plugin
+  // has to.
+  using simple_handler_t = size_t (*)(const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
+  using board_handler_t  = size_t (*)(board_i& board, const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
 
   struct resource_t {
     const std::string                                     path;
@@ -917,3 +953,91 @@ using param_type_t     = plugin_api_i::param_type_t;
 using param_spec_t     = plugin_api_i::param_spec_t;
 using handler_error_t  = plugin_api_i::handler_error_t;
 using handler_result_t = plugin_api_i::handler_result_t;
+
+// Converts a handler_result_t to/from the single parameter_t envelope that
+// actually crosses add_resource's simple_handler_t/board_handler_t
+// boundary: {"ok": true, "body": <parameter_map_t>} on success,
+// {"ok": false, "http_code": <int64>, "message": <string>} on failure.
+namespace handler_wire {
+inline parameter_t to_wire (const handler_result_t& result) {
+  if ( result ) {
+    return parameter_map_t {
+        {"ok",   true },
+        {"body", *result}
+    };
+  }
+  return parameter_map_t {
+      {"ok",        false                                            },
+      {"http_code", static_cast<int64_t>(result.error( ).http_code)},
+      {"message",   result.error( ).message                        },
+  };
+}
+
+// A malformed envelope (missing key, wrong alternative - only possible
+// from a broken or version-mismatched handler) is reported the same way a
+// handler-reported failure is: there is no separate "the wire itself was
+// bad" channel, dispatch() only ever needs to know "serve this body" or
+// "send this error".
+inline handler_result_t from_wire (const parameter_t& wire) {
+  try {
+    const auto& m = std::get<parameter_map_t>(wire);
+    if ( std::get<bool>(m.at("ok")) ) {
+      return std::get<parameter_map_t>(m.at("body"));
+    }
+    return std::unexpected(handler_error_t {
+        static_cast<int>(std::get<int64_t>(m.at("http_code"))),
+        std::get<std::string>(m.at("message")),
+    });
+  } catch ( const std::exception& e ) {
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("malformed handler response envelope: {}", e.what( ))});
+  }
+}
+}  // namespace handler_wire
+
+// Registers an ordinary parameter_map_t-in/handler_result_t-out function
+// (the shape every handler in handlers.cxx/cell_check.cxx/boards_list.cxx
+// actually writes) as a plugin_api_i::simple_handler_t/board_handler_t -
+// the byte-only shape the ABI boundary requires. Handler is a non-type
+// template parameter (a plain function, possibly with internal linkage -
+// both are fine as of C++11), so each instantiation is itself an ordinary,
+// capture-free function - a valid simple_handler_t/board_handler_t value,
+// compiled by whichever side (host or plugin) registers it.
+template<handler_result_t (*Handler)(const parameter_map_t& params)>
+size_t simple_handler_adapter (const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap) {
+  parameter_bytestream_t params_bs(const_cast<std::byte*>(params_buf), params_len);
+  const auto             params = params_bs.load( );
+  if ( !params || !std::holds_alternative<parameter_map_t>(*params) ) {
+    return 0;
+  }
+
+  handler_result_t result;
+  try {
+    result = Handler(std::get<parameter_map_t>(*params));
+  } catch ( const std::exception& e ) {
+    result = std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, e.what( )});
+  }
+
+  parameter_bytestream_t out_bs(out_buf, out_cap);
+  const auto             stored = out_bs.store(handler_wire::to_wire(result));
+  return stored ? out_bs.size( ) : 0;
+}
+
+template<handler_result_t (*Handler)(board_i& board, const parameter_map_t& params)>
+size_t board_handler_adapter (board_i& board, const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap) {
+  parameter_bytestream_t params_bs(const_cast<std::byte*>(params_buf), params_len);
+  const auto             params = params_bs.load( );
+  if ( !params || !std::holds_alternative<parameter_map_t>(*params) ) {
+    return 0;
+  }
+
+  handler_result_t result;
+  try {
+    result = Handler(board, std::get<parameter_map_t>(*params));
+  } catch ( const std::exception& e ) {
+    result = std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, e.what( )});
+  }
+
+  parameter_bytestream_t out_bs(out_buf, out_cap);
+  const auto             stored = out_bs.store(handler_wire::to_wire(result));
+  return stored ? out_bs.size( ) : 0;
+}

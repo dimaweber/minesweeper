@@ -546,13 +546,13 @@ int main (int argc, const char* argv[]) {
   };
 
   const std::vector<plugin_api_i::resource_t> entrypoints {
-      {.path = "session/new",          .method = http_methods_t::POST, .handler = session_new_handler,          .params = {{.name = "board_id", .type = param_type_t::string, .required = false}}},
-      {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_size_handler,          },
-      {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_bombs_handler,         },
-      {.path = "board/fully_revealed", .method = http_methods_t::GET,  .handler = board_fully_revealed_handler,},
-      {.path = "board/check",          .method = http_methods_t::POST, .handler = board_check_handler,         },
-      {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = cell_reveal_handler,          .params = xy_params                                                              },
-      {.path = "cell/flag",            .method = http_methods_t::POST, .handler = cell_flag_handler,            .params = xy_params                                                              },
+      {.path = "session/new",          .method = http_methods_t::POST, .handler = simple_handler_adapter<session_new_handler>,          .params = {{.name = "board_id", .type = param_type_t::string, .required = false}}},
+      {.path = "board/size",           .method = http_methods_t::GET,  .handler = board_handler_adapter<board_size_handler>,          },
+      {.path = "board/bombs",          .method = http_methods_t::GET,  .handler = board_handler_adapter<board_bombs_handler>,         },
+      {.path = "board/fully_revealed", .method = http_methods_t::GET,  .handler = board_handler_adapter<board_fully_revealed_handler>,},
+      {.path = "board/check",          .method = http_methods_t::POST, .handler = board_handler_adapter<board_check_handler>,         },
+      {.path = "cell/reveal",          .method = http_methods_t::POST, .handler = board_handler_adapter<cell_reveal_handler>,          .params = xy_params                                                              },
+      {.path = "cell/flag",            .method = http_methods_t::POST, .handler = board_handler_adapter<cell_flag_handler>,            .params = xy_params                                                              },
   };
   for ( const auto& resource: entrypoints ) {
     api->add_resource(resource);

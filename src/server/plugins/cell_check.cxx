@@ -89,7 +89,7 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
 
 void install_resource ( ) {
   api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
-  api->add_resource(rest_resource_path, http_methods_t::POST, cell_check_handler,
+  api->add_resource(rest_resource_path, http_methods_t::POST, board_handler_adapter<cell_check_handler>,
       {
           {.name = "x", .type = param_type_t::integer, .required = true},
           {.name = "y", .type = param_type_t::integer, .required = true},

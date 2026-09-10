@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <wbr/string_manipulations.hxx>
 
@@ -70,6 +71,49 @@ result_t<parameter_map_t> parse_params (restbed::Session& session, const std::ve
     }
   }
   return out;
+}
+
+// dispatch() doesn't know a resource's parsed query params size ahead of
+// time; growing and retrying is safe here (pure serialization, no side
+// effects) unlike growing the handler's *output* buffer would be (see
+// handler_output_capacity below).
+constexpr size_t initial_bytestream_capacity = 4096;
+constexpr size_t max_bytestream_capacity     = 16u * 1024 * 1024;
+
+result_t<std::vector<std::byte>> store_growing (const parameter_t& value) {
+  for ( size_t capacity = initial_bytestream_capacity; capacity <= max_bytestream_capacity; capacity *= 2 ) {
+    std::vector<std::byte> buffer(capacity);
+    parameter_bytestream_t bs(buffer);
+    if ( const auto stored = bs.store(value); stored ) {
+      buffer.resize(bs.size( ));
+      return buffer;
+    }
+  }
+  return std::unexpected(fmt::format("value too large to serialize (> {} bytes)", max_bytestream_capacity));
+}
+
+// Every board_handler_t/simple_handler_t call gets one buffer this large
+// to store() its result into, and is never retried with a bigger one on
+// failure - unlike store_growing() above, a board_handler_t like
+// cell_check_handler has already mutated the board by the time it tries
+// to serialize its result, so calling it again "with more room" would run
+// its side effects twice (e.g. re-revealing cells that reveal_cells()
+// would now see as already revealed, silently returning a truncated
+// result instead of failing loudly). 1 MiB comfortably covers this
+// project's board sizes; if that ever stops being true, the fix is a
+// bigger constant, not a retry.
+constexpr size_t handler_output_capacity = 1024 * 1024;
+
+handler_result_t unwrap_handler_output (std::span<const std::byte> out_bytes) {
+  if ( out_bytes.empty( ) ) {
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, "handler failed to produce a response"});
+  }
+  parameter_bytestream_t out_bs(const_cast<std::byte*>(out_bytes.data( )), out_bytes.size( ));
+  const auto             envelope = out_bs.load( );
+  if ( !envelope ) {
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("malformed handler response: {}", envelope.error( ))});
+  }
+  return handler_wire::from_wire(*envelope);
 }
 }  // namespace
 
@@ -638,24 +682,34 @@ void plugin_api_t::dispatch (restbed::Session& session, const resource_t& resour
     return r.send_error(restbed::BAD_REQUEST, content_type, params.error( ));
   }
 
+  // Everything from here on crosses plugin_api_i::simple_handler_t/
+  // board_handler_t as bytes only: params_bytes is *params, store()d once;
+  // out_buffer is where the handler (host-resident or plugin-resident
+  // alike) store()s its own handler_result_t. No parameter_t,
+  // parameter_map_t, or std::string is passed across that function-pointer
+  // call as a C++ object.
+  const auto params_bytes = store_growing(parameter_t {*params});
+  if ( !params_bytes ) {
+    return r.send_error(restbed::INTERNAL_SERVER_ERROR, content_type, params_bytes.error( ));
+  }
+  std::vector<std::byte> out_buffer(handler_output_capacity);
+
   const handler_result_t result = std::visit(
       [&] (auto handler) -> handler_result_t {
-        try {
-          if constexpr ( std::is_same_v<decltype(handler), board_handler_t> ) {
-            const auto id = http_api_.authorize_client(session);
-            if ( !id ) {
-              return std::unexpected(handler_error_t {restbed::UNAUTHORIZED, id.error( )});
-            }
-            const auto board = board_for_client(*id);
-            if ( !board ) {
-              return std::unexpected(handler_error_t {restbed::FORBIDDEN, "client not found"});
-            }
-            return handler(*board, *params);
-          } else {
-            return handler(*params);
+        if constexpr ( std::is_same_v<decltype(handler), board_handler_t> ) {
+          const auto id = http_api_.authorize_client(session);
+          if ( !id ) {
+            return std::unexpected(handler_error_t {restbed::UNAUTHORIZED, id.error( )});
           }
-        } catch ( const std::exception& e ) {
-          return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, e.what( )});
+          const auto board = board_for_client(*id);
+          if ( !board ) {
+            return std::unexpected(handler_error_t {restbed::FORBIDDEN, "client not found"});
+          }
+          const size_t written = handler(*board, params_bytes->data( ), params_bytes->size( ), out_buffer.data( ), out_buffer.size( ));
+          return unwrap_handler_output({out_buffer.data( ), written});
+        } else {
+          const size_t written = handler(params_bytes->data( ), params_bytes->size( ), out_buffer.data( ), out_buffer.size( ));
+          return unwrap_handler_output({out_buffer.data( ), written});
         }
       },
       resource.handler);

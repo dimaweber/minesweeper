@@ -42,7 +42,7 @@ handler_result_t boards_list_handler ([[maybe_unused]] const parameter_map_t& pa
 
 void install_resource ( ) {
   api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
-  api->add_resource(rest_resource_path, http_methods_t::GET, boards_list_handler);
+  api->add_resource(rest_resource_path, http_methods_t::GET, simple_handler_adapter<boards_list_handler>);
 }
 }  // namespace
 
