@@ -7,6 +7,17 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- Fix `server_plugins.md`: document the byte-only handler ABI and the adapter templates
+  (`ba804d2`). Still described `simple_handler_t`/`board_handler_t` as
+  `handler_result_t(*)(const parameter_map_t&)`-shaped and showed plugin registration
+  passing a handler function directly — stale since the handler ABI changed to byte-only
+  and plugin authors now register through `simple_handler_adapter<Handler>`/
+  `board_handler_adapter<Handler>` instead; the worked example's `install_resource()`
+  would no longer even compile as written. Rewrote "The two handler shapes" to show the
+  actual ABI-level signatures, explain why, and document the adapter templates — a plugin
+  author still just writes an ordinary `parameter_map_t`-in/`handler_result_t`-out
+  function, only the registration line changes. Updated the worked example to match, and
+  added `create_fixed_board` to the boards/clients method list.
 - **Add `--log-dir`/`--data-dir` to `ms_server`; fix RSA keys loading before argv is
   parsed** (`545e5c0`). RSA/TLS material and every log file defaulted to relative paths in
   the current working directory (a gap flagged in `ai_review.md`), so where you `cd`
