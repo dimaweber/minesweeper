@@ -36,15 +36,17 @@ cmake --build build --target ms_server cell_check boards_list ms_test
 ## Running everything
 
 ```
-cd build
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
+
+(`--test-dir` works from any directory; `cd build && ctest ...` works too if you're
+already there.)
 
 Filter to just one:
 
 ```
-ctest -R live_replay --output-on-failure
-ctest -R ParametersBitstream --output-on-failure
+ctest --test-dir build -R live_replay --output-on-failure
+ctest --test-dir build -R ParametersBitstream --output-on-failure
 ```
 
 ## Running `ms_test` directly
