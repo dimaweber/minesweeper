@@ -5,6 +5,50 @@ yet, so entries are grouped by day. Written from the actual git history
 (`git log`) — each entry reflects what its commit's message says, not a
 reconstruction after the fact.
 
+## 2026-09-10
+
+- **Harden `parameter_bytestream_t`: bounds-checked, versioned `store()`/`load()`
+  returning `result_t`** (`9715093`). `store()`/`load()` are now the only public
+  surface — `[[nodiscard]]`, returning `result_t<void>`/`result_t<parameter_t>`
+  (`std::expected<T, std::string>`, whose alias moved earlier in `api.hxx` so this
+  class can use it) instead of ever letting an exception reach the caller;
+  `serialize()`/`deserialize()` moved to `private` and stay throwing internally, but
+  every failure (buffer overrun, malformed tag, version mismatch, reusing one
+  instance for a second `store()`/`load()`) is normalized to one string at that
+  boundary. Every `write_*`/`read_*` primitive now funnels through a
+  `check_capacity()` that throws on overrun, replacing `write_*`'s old `0`/`false`
+  return that no caller ever checked, and adding a bound check `read_string()`
+  (among others) previously lacked entirely — a truncated/corrupted buffer could
+  read past `buffer_size_`. An unrecognized `type_tag` byte now throws instead of
+  `deserialize()` silently returning a null `parameter_t`. Also fixed real UB from
+  the previous commit: negating `INT64_MIN` while still a signed `int64_t` (write
+  side, and the `neg_number8` read case) is signed-overflow UB; both now cast to
+  `uint64_t` first and negate in the unsigned, modular domain. Added a one-byte
+  `wire_version`, checked once per buffer by `store()`/`load()` outside the
+  recursive tag grammar. Return-value cleanup: `write_tag`/`write_len`/`put_byte`
+  and all `write(...)` overloads are now `void`; removed two dead helpers,
+  `write_value<T>()` and templated `write_len<T>()`. Tests updated for the new API
+  (shared `roundtrip()` helper), `INT64_MAX`/`INT64_MIN` added to the integer test
+  list, and two new tests added: `RejectsReusedInstance`,
+  `RejectsWireVersionMismatch`.
+- Make the bitstream more compact: variable-width int/length encoding instead of a
+  fixed 8 bytes (`1785a5c`). String length and number values were always written as
+  a full 8-byte `int64_t`/`size_t`, mostly zero bytes for the common case of small
+  numbers. Replaced the single `number`/`string` tag with eight width-specific tags
+  each (`number1`..`number8`, `string1`..`string8`, plus `neg_number1`..`neg_number8`
+  for negatives written as sign + magnitude), so a value only costs as many bytes as
+  its magnitude actually needs — 21 more `type_tag` values in exchange for a
+  meaningfully smaller payload on the common case.
+- Add googletest support; add `parameter_bytestream_t` with basic tests (`9cd0c0c`).
+  New `BUILD_TESTS` CMake option wires up GoogleTest (`ms_test` target,
+  `gtest_discover_tests()`) and a first `parameters_bitstream.unittest.cxx`.
+  Introduces `parameter_bytestream_t` in `api.hxx`: `serialize()`/`deserialize()`
+  pack/unpack a `parameter_t` into a raw byte buffer (`std::byte*`/
+  `std::span<std::byte>`), tagging each value with a `type_tag` so `deserialize()`
+  can recover which alternative was written. Only `int64_t` is actually stored for
+  numbers at this point — every other integral type is meant to be cast in/out by
+  the caller.
+
 ## 2026-09-09
 
 - Fix `server_plugins.md`: RSA/SSL paths live on `http_api_i`, not `plugin_api_i`
