@@ -7,6 +7,35 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Add a fixed, reproducible board #11; log all requests/responses; add an
+  automated live-replay regression test** (`bd1db71`). `rand()`'s actual output
+  isn't standardized across platforms/compilers/libc, so a fixed seed gives no
+  cross-machine reproducibility guarantee — added
+  `plugin_api_i::create_fixed_board(width, height, mines)` (appended at the very
+  end of the interface, no ABI version bump needed) backed by a new
+  `board_t(width, height, std::span<const coord_t>)` constructor that places
+  mines at explicit coordinates instead of via `rand()`. `server.cxx` creates
+  board #11 from it at startup alongside the usual 10 random boards; its mine
+  layout was transcribed from a real client session screenshot and verified —
+  by hand against all 90 checkable neighbor-count digits before being
+  committed, then independently again via a live session against the running
+  server. Also added a fourth dedicated `spdlog` logger (`requests` →
+  `requests.log`, matching the existing `restbed`/`plugins` logger pattern),
+  wired into `response_t::send()` — the single funnel every response already
+  goes through — logging every request/response pair regardless of which of
+  `dispatch()`'s paths produced it. On top of that,
+  `src/server/tests/live/replay_requests_log.py` replays a captured
+  `requests.log` against a live server (spawning `ms_server` itself, or
+  targeting one already running) and compares status codes and
+  structurally-parsed JSON bodies against what was logged; since every action
+  handler already reports its outcome through a top-level `"status"` field
+  (`"ok"`/`"boom"`/`"win"`/`"lose"`) and response bodies are expected to keep
+  gaining fields over time, only an HTTP status or `"status"`-field mismatch is
+  a hard failure by default — any other body difference is a warning,
+  promotable via `--warnings-as-error`. Wired into CMake as a `live_replay`
+  CTest target with a committed fixture covering a losing and a fully-winning
+  session against board #11. Added `tests.md` documenting how to build and run
+  both `ms_test` and `live_replay`.
 - **Self-describing, checksummed `parameter_bytestream_t` wire header** (`8bfb43e`).
   `store()`/`load()`'s header (previously just a version byte) now also carries a
   fixed-width payload length and a CRC32 checksum, closing two gaps flagged as
