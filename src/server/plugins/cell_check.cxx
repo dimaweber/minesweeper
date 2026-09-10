@@ -31,15 +31,15 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
   const auto coord = board.coord(x, y);
   if ( !coord ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: invalid coordinates: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Invalid coordinates"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "invalid coordinates"});
   }
   if ( !board.cell(coord).is_revealed( ) ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: cell is not revealed: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Cell is not revealed"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "cell is not revealed"});
   }
   if ( board.cell(coord).is_boom( ) ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: cell is a bomb: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Cell is a bomb"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "cell is a bomb"});
   }
   const int flags_around = board.neighbor_flags_count(coord);
   const int bombs_around = board.neighbor_bombs_count(coord);
@@ -49,7 +49,7 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
   if ( flags_around != bombs_around ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: number of flags around cell does not match number of bombs: x={}, y={}, flags_around={}, bombs_around={}", x, y, flags_around,
         bombs_around);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Number of flags around cell does not match number of bombs"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "number of flags around cell does not match number of bombs"});
   }
 
   api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: revealing neighbors of cell x={}, y={}", x, y);
@@ -88,7 +88,7 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
 }
 
 void install_resource ( ) {
-  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
+  api->log(plugin_api_i::log_level_t::debug, "plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
   api->add_resource(rest_resource_path, http_methods_t::POST, board_handler_adapter<cell_check_handler>,
       {
           {.name = "x", .type = param_type_t::integer, .required = true},
@@ -111,7 +111,7 @@ const char* description ( ) {
 
 void init_plugin ([[maybe_unused]] plugin_api_i& api_iface) {
   api = &api_iface;
-  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
+  api->log(plugin_api_i::log_level_t::debug, "plugin {}[{}] loaded successfully", name( ), version( ));
 
   api->ready_to_load_resources_signal( ).connect(install_resource);
 }
