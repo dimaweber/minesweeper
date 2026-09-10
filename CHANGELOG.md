@@ -7,6 +7,26 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Add `envelope`: a standalone compress/encrypt/sign/base64 byte-wrapper library**
+  (`7906c61`). A generic byte-buffer wrapper for network use, factored out as its own
+  library from the start (`libs/envelope/`, own `CMakeLists.txt`, no `#include` of
+  anything under `src/`) so it can be lifted into its own repository later unmodified.
+  One class (`envelope::envelope_t`), not four independently-stackable wrappers, because
+  the layer order isn't a style choice: compress must run before encrypt (encrypted
+  bytes don't compress), sign must run after encrypt over the ciphertext —
+  "encrypt-then-MAC" — so `unwrap()` verifies before decrypt/decompress ever touch the
+  bytes (closing off the padding-oracle and decompression-bomb-on-unauthenticated-input
+  classes of bug), and the signature covers the header's magic+mask too, so a tampered
+  mask can't downgrade a receiver into skipping verification (the JWT-`"alg":"none"`
+  class of bug). Wire format is self-describing (`["ENV1" magic][mask][payload]
+  [signature]`, base64-wrapped last if configured) — a receiver only needs the right
+  key(s), not to separately reconfigure matching toggles. Algorithms: zlib deflate
+  (size-prefixed, capped against a decompression-bomb-via-size-lie), AES-256-GCM (AEAD,
+  fresh nonce per call, via OpenSSL EVP), HMAC-SHA256 (constant-time tag comparison via
+  `CRYPTO_memcmp`), hand-rolled base64. Wired into the top-level `CMakeLists.txt` via
+  `add_subdirectory` — not linked into any minesweeper target, built and tested
+  standalone. 16 tests, including the mask-downgrade-attack rejection case. Added its own
+  `readme.md`, `changelog.md`, and `tests.md`.
 - Regenerate the live-replay fixture against the new error-message casing (`24dcbcc`). The
   casing unification commit below changed 3 of the fixture's recorded response bodies (a
   trailing period added to `cell_check`'s "Number of flags..." error) — those were only
