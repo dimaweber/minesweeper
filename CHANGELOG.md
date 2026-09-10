@@ -7,6 +7,35 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Unify string casing: human-visible text as sentences, logs lowercase** (`988ad5e`).
+  Two audiences, two conventions, applied consistently across the whole server for the
+  first time — previously an ad hoc mix, and in `cell_check`'s case actively reversed
+  twice in the last few commits. Anything a human can end up reading in an HTTP response
+  (every `handler_error_t` message, every `result_t<T>` error that flows into one, the
+  `std::out_of_range` from `board_t::cell()` the handler adapters convert to a 500,
+  `cell_check`'s own errors, the `"info": "..."` hint field `cell/reveal` adds) is now a
+  proper English sentence — capitalized, ending with a period; this reverses
+  `cell_check.cxx`'s `handler_error_t` messages back to capitalized (`4a77b07` had
+  lowercased them, following `server_plugins.md`'s now-corrected recommendation) — its log
+  messages stay lowercase, unaffected. Everything passed to `SPDLOG_*`/
+  `plugin_api_i::log`/`spdlog::logger` now starts lowercase (`server.cxx` and `rsa.cxx` had
+  this backwards almost without exception), with acronyms (`RSA`, `SSL`, `JWT`, `ABI`,
+  `DH`) keeping their canonical casing regardless of sentence position. Left
+  `parameter_bytestream_t`'s internal error messages (`api.hxx`) as lowercase
+  `component: reason` diagnostic fragments rather than sentence-casing them, since they
+  only ever reach an HTTP response embedded inside another (now sentence-cased) wrapping
+  message. Not touched: protocol tokens a client string-compares against
+  (`"ok"`/`"boom"`/`"win"`/`"lose"`), the `requests.log` audit trail, and plugin
+  `name()`/`version()`/`description()` metadata. Also fixed a real, unrelated staleness in
+  `server_api.md` noticed while touching it: JWT-decode failures no longer surface as a raw
+  `500` plain-text body — `get_id_from_jwt`'s `try`/`catch` already covers the whole
+  decode+verify+claim-parse sequence. Updated `server_plugins.md`'s "Conventions to follow"
+  (previously recommended the opposite) and every per-endpoint error table in
+  `server_api.md` to match, including fixing a couple of error strings that were already
+  wrong/aspirational before this change. Verified: full rebuild, `ctest` 12/12
+  (`live_replay` still passes — the changed error text only touches responses without a
+  `"status"` field, so it's a warning under that test's outcome/warning split, not a
+  failure).
 - Fix `server_plugins.md`: document the byte-only handler ABI and the adapter templates
   (`ba804d2`). Still described `simple_handler_t`/`board_handler_t` as
   `handler_result_t(*)(const parameter_map_t&)`-shaped and showed plugin registration
