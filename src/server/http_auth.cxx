@@ -21,12 +21,12 @@ result_t<std::string> get_jwt_from_request (restbed::Session& session) {
   const std::string token_str = request->get_header("Authorization", "");
 
   if ( token_str.empty( ) || !token_str.starts_with("Bearer ") ) {
-    return std::unexpected("missing mandatory header Authorization");
+    return std::unexpected("Missing mandatory header Authorization.");
   }
 
   const auto token = wbr::str::splitAtFirst(token_str, " ");
   if ( !token || token->second.empty( ) ) {
-    return std::unexpected("invalid Authorization header");
+    return std::unexpected("Invalid Authorization header.");
   }
 
   return std::string {token->second};
@@ -45,21 +45,21 @@ result_t<int> get_id_from_jwt (const std::string& token) {
     std::errc ec;
     const int id = wbr::str::num<int, wbr::str::num_match_t::full>(client_id_str, ec);
     if ( ec != std::errc { } ) {
-      return std::unexpected("invalid client_id in JWT token");
+      return std::unexpected("Invalid client_id in JWT token.");
     }
     return id;
   } catch ( const jwt::error::token_verification_exception& e ) {
     SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
-    return std::unexpected("invalid JWT token");
+    return std::unexpected("Invalid JWT token.");
   } catch ( const std::invalid_argument& e ) {
     SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
-    return std::unexpected("invalid JWT token");
+    return std::unexpected("Invalid JWT token.");
   } catch ( const std::runtime_error& error ) {
     SPDLOG_ERROR("JWT verification failed: {}", error.what( ));
-    return std::unexpected("invalid JWT token");
+    return std::unexpected("Invalid JWT token.");
   } catch ( const std::exception& e ) {
     SPDLOG_ERROR("JWT verification failed: {}", e.what( ));
-    return std::unexpected("invalid JWT token");
+    return std::unexpected("Invalid JWT token.");
   }
 }
 
@@ -88,11 +88,11 @@ result_t<std::string> create_jwt_for_client (client_id_t client_id) {
                            .set_payload_claim(client_id_claim, jwt::claim(std::to_string(client_id)))
                            .sign(jwt::algorithm::rs256(api->http_api(  )->rsa_public_key( ), api->http_api(  )->rsa_private_key( ), "", ""));
 
-    SPDLOG_DEBUG("Generated JWT token for client {}: {}", client_id, token);
+    SPDLOG_DEBUG("generated JWT token for client {}: {}", client_id, token);
     return token;
   } catch ( const std::exception& e ) {
     SPDLOG_ERROR("JWT generation failed: {}", e.what( ));
-    return std::unexpected("failed to generate JWT token");
+    return std::unexpected("Failed to generate JWT token.");
   }
 }
 

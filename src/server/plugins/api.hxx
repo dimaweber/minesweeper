@@ -1095,7 +1095,7 @@ inline handler_result_t from_wire (const parameter_t& wire) {
         std::get<std::string>(m.at("message")),
     });
   } catch ( const std::exception& e ) {
-    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("malformed handler response envelope: {}", e.what( ))});
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("Malformed handler response envelope: {}.", e.what( ))});
   }
 }
 }  // namespace handler_wire

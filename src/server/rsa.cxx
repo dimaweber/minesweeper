@@ -151,7 +151,7 @@ struct bio_t {
 }  // namespace
 
 bool generate_rsa_private_key (const std::filesystem::path& priv_key_path, const std::filesystem::path pub_key_path, int bits = 2048) {
-  SPDLOG_DEBUG("Generate RSA key to {}/{}", priv_key_path, pub_key_path);
+  SPDLOG_DEBUG("generate RSA key to {}/{}", priv_key_path, pub_key_path);
 
   evp_pkey_t pkey = [bits] ( ) -> EVP_PKEY* {
     EVP_PKEY*      pkey = nullptr;
@@ -174,13 +174,13 @@ bool generate_rsa_private_key (const std::filesystem::path& priv_key_path, const
   }( );
 
   if ( !pkey ) {
-    SPDLOG_ERROR("Failed to generate RSA private key");
+    SPDLOG_ERROR("failed to generate RSA private key");
     return false;
   }
 
   bio_t fp {BIO_new_file(priv_key_path.c_str( ), "wb")};
   if ( !fp ) {
-    SPDLOG_ERROR("Failed to open {} for writing", priv_key_path);
+    SPDLOG_ERROR("failed to open {} for writing", priv_key_path);
     return false;
   }
 
@@ -188,7 +188,7 @@ bool generate_rsa_private_key (const std::filesystem::path& priv_key_path, const
 
   bio_t fp2 {BIO_new_file(pub_key_path.c_str( ), "wb")};
   if ( !fp2 ) {
-    SPDLOG_ERROR("Failed to open {} for writing", pub_key_path);
+    SPDLOG_ERROR("failed to open {} for writing", pub_key_path);
     return false;
   }
 
@@ -201,24 +201,24 @@ std::pair<std::string, std::string> rsa_key_pair (const std::filesystem::path rs
   if ( !std::filesystem::exists(rsa_priv_key_path) || !std::filesystem::exists(rsa_pub_key_path) ) {
     SPDLOG_INFO("RSA key pair not found, generating new one");
     if ( !generate_rsa_private_key(rsa_priv_key_path, rsa_pub_key_path) )
-      throw std::runtime_error("Failed to generate private.pem");
+      throw std::runtime_error("failed to generate private.pem");
   }
 
   std::ifstream priv_key_file {rsa_priv_key_path};
   if ( !priv_key_file.is_open( ) ) {
-    SPDLOG_ERROR("Failed to open {}", rsa_priv_key_path);
-    throw std::runtime_error {fmt::format("Failed to open {}", rsa_priv_key_path)};
+    SPDLOG_ERROR("failed to open {}", rsa_priv_key_path);
+    throw std::runtime_error {fmt::format("failed to open {}", rsa_priv_key_path)};
   }
   const std::string priv_key {std::istreambuf_iterator<char>(priv_key_file), std::istreambuf_iterator<char>( )};
-  SPDLOG_DEBUG("Loaded RSA private key from {}", rsa_priv_key_path);
+  SPDLOG_DEBUG("loaded RSA private key from {}", rsa_priv_key_path);
 
   std::ifstream pub_key_file {rsa_pub_key_path};
   if ( !pub_key_file.is_open( ) ) {
-    SPDLOG_ERROR("Failed to open {}", rsa_pub_key_path);
-    throw std::runtime_error {fmt::format("Failed to open {}", rsa_pub_key_path)};
+    SPDLOG_ERROR("failed to open {}", rsa_pub_key_path);
+    throw std::runtime_error {fmt::format("failed to open {}", rsa_pub_key_path)};
   }
   const std::string pub_key {std::istreambuf_iterator<char>(pub_key_file), std::istreambuf_iterator<char>( )};
-  SPDLOG_DEBUG("Loaded RSA public key from {}", rsa_pub_key_path);
+  SPDLOG_DEBUG("loaded RSA public key from {}", rsa_pub_key_path);
 
   return {priv_key, pub_key};
 }
@@ -226,57 +226,57 @@ std::pair<std::string, std::string> rsa_key_pair (const std::filesystem::path rs
 std::optional<x509_t> create_self_signed_cert (const evp_pkey_t& rsa_key, long days_valid) {
   x509_t cert;
   if ( !cert ) {
-    SPDLOG_ERROR("Failed to create new X509 certificate");
+    SPDLOG_ERROR("failed to create new X509 certificate");
     return std::nullopt;
   }
   if ( X509_set_version(cert, 2) != 1 ) {
     const auto err = ERR_get_error( );
-    SPDLOG_ERROR("Failed to set X509 version: {}", ERR_error_string(err, nullptr));
+    SPDLOG_ERROR("failed to set X509 version: {}", ERR_error_string(err, nullptr));
     return std::nullopt;
   }
 
   if ( ASN1_INTEGER_set(X509_get_serialNumber(cert), 1) != 1 ) {
     const auto err = ERR_get_error( );
-    SPDLOG_ERROR("Failed to set X509 serial number: {}", ERR_error_string(err, nullptr));
+    SPDLOG_ERROR("failed to set X509 serial number: {}", ERR_error_string(err, nullptr));
     return std::nullopt;
   }
 
   if ( X509_gmtime_adj(X509_get_notBefore(cert), 0) == nullptr ) {
     const auto err = ERR_get_error( );
-    SPDLOG_ERROR("Failed to set X509 notBefore: {}", ERR_error_string(err, nullptr));
+    SPDLOG_ERROR("failed to set X509 notBefore: {}", ERR_error_string(err, nullptr));
     return std::nullopt;
   }
   if ( X509_gmtime_adj(X509_get_notAfter(cert), days_valid * 24 * 60 * 60) == nullptr ) {
     const auto err = ERR_get_error( );
-    SPDLOG_ERROR("Failed to set X509 notAfter: {}", ERR_error_string(err, nullptr));
+    SPDLOG_ERROR("failed to set X509 notAfter: {}", ERR_error_string(err, nullptr));
     return std::nullopt;
   }
 
   X509_NAME* name = X509_get_subject_name(cert);
   if ( !name ) {
-    SPDLOG_ERROR("Failed to get X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to get X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
   if ( X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0) != 1 ) {
-    SPDLOG_ERROR("Failed to add CN to X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to add CN to X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
   if ( X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, reinterpret_cast<const unsigned char*>("UA"), -1, -1, 0) != 1 ) {
-    SPDLOG_ERROR("Failed to add C to X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to add C to X509 subject name: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
   if ( X509_set_issuer_name(cert, name) != 1 ) {
-    SPDLOG_ERROR("Failed to set X509 issuer name: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to set X509 issuer name: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
 
   if ( X509_set_pubkey(cert, rsa_key) != 1 ) {
-    SPDLOG_ERROR("Failed to set X509 public key: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to set X509 public key: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
 
   if ( !X509_sign(cert, rsa_key, EVP_sha256( )) ) {
-    SPDLOG_ERROR("Failed to sign X509 certificate: {}", ERR_error_string(ERR_get_error( ), nullptr));
+    SPDLOG_ERROR("failed to sign X509 certificate: {}", ERR_error_string(ERR_get_error( ), nullptr));
     return std::nullopt;
   }
 
@@ -286,12 +286,12 @@ std::optional<x509_t> create_self_signed_cert (const evp_pkey_t& rsa_key, long d
 bool write_cert_to_file (const x509_t& cert, const std::filesystem::path& cert_path) {
   bio_t out {BIO_new_file(cert_path.string( ).c_str( ), "w")};
   if ( !out ) {
-    SPDLOG_ERROR("Failed to open {} for writing", cert_path);
+    SPDLOG_ERROR("failed to open {} for writing", cert_path);
     return false;
   }
 
   if ( PEM_write_bio_X509(out, cert) <= 0 ) {
-    SPDLOG_ERROR("Failed to write X509 certificate to {}", cert_path);
+    SPDLOG_ERROR("failed to write X509 certificate to {}", cert_path);
     return false;
   }
 
@@ -301,28 +301,28 @@ bool write_cert_to_file (const x509_t& cert, const std::filesystem::path& cert_p
 std::optional<evp_pkey_t> generate_dh_params ( ) {
   evp_pkey_ctx_t ctx {EVP_PKEY_CTX_new_from_name(nullptr, "DH", nullptr)};
   if ( !ctx ) {
-    SPDLOG_ERROR("Failed to create EVP_PKEY_CTX for DH");
+    SPDLOG_ERROR("failed to create EVP_PKEY_CTX for DH");
     return std::nullopt;
   }
 
   if ( EVP_PKEY_paramgen_init(ctx) <= 0 ) {
-    SPDLOG_ERROR("Failed to initialize DH parameter generation");
+    SPDLOG_ERROR("failed to initialize DH parameter generation");
     return std::nullopt;
   }
 
   if ( EVP_PKEY_CTX_set_dh_paramgen_prime_len(ctx, 2048) <= 0 ) {
-    SPDLOG_ERROR("Failed to set DH prime length");
+    SPDLOG_ERROR("failed to set DH prime length");
     return std::nullopt;
   }
 
   if ( EVP_PKEY_CTX_set_dh_paramgen_generator(ctx, 2) <= 0 ) {
-    SPDLOG_ERROR("Failed to set DH generator");
+    SPDLOG_ERROR("failed to set DH generator");
     return std::nullopt;
   }
 
   evp_pkey_t dh_params;
   if ( EVP_PKEY_paramgen(ctx, &dh_params.pkey) <= 0 ) {
-    SPDLOG_ERROR("Failed to generate DH parameters");
+    SPDLOG_ERROR("failed to generate DH parameters");
     return std::nullopt;
   }
   return dh_params;
@@ -332,18 +332,18 @@ std::optional<evp_pkey_t> generate_dh_params ( ) {
 std::optional<evp_pkey_t> generate_dh_keypair (const evp_pkey_t& dh_params) {
   evp_pkey_ctx_t ctx {EVP_PKEY_CTX_new_from_pkey(nullptr, dh_params, nullptr)};
   if ( !ctx ) {
-    SPDLOG_ERROR("Failed to create EVP_PKEY_CTX for DH key generation");
+    SPDLOG_ERROR("failed to create EVP_PKEY_CTX for DH key generation");
     return std::nullopt;
   }
 
   if ( EVP_PKEY_keygen_init(ctx) <= 0 ) {
-    SPDLOG_ERROR("Failed to initialize DH key generation");
+    SPDLOG_ERROR("failed to initialize DH key generation");
     return std::nullopt;
   }
 
   evp_pkey_t dh_keypair;
   if ( EVP_PKEY_keygen(ctx, &dh_keypair.pkey) <= 0 ) {
-    SPDLOG_ERROR("Failed to generate DH key pair");
+    SPDLOG_ERROR("failed to generate DH key pair");
     return std::nullopt;
   }
   return dh_keypair;
@@ -353,11 +353,11 @@ std::optional<evp_pkey_t> generate_dh_keypair (const evp_pkey_t& dh_params) {
 bool write_dh_params_to_file (const evp_pkey_t& dh_params, const std::filesystem::path& dh_path) {
   bio_t out {BIO_new_file(dh_path.c_str( ), "w")};
   if ( !out ) {
-    SPDLOG_ERROR("Failed to open {} for writing", dh_path);
+    SPDLOG_ERROR("failed to open {} for writing", dh_path);
     return false;
   }
   if ( PEM_write_bio_Parameters(out, dh_params) <= 0 ) {
-    SPDLOG_ERROR("Failed to write DH parameters to {}", dh_path);
+    SPDLOG_ERROR("failed to write DH parameters to {}", dh_path);
     return false;
   }
 
@@ -368,11 +368,11 @@ bool write_dh_params_to_file (const evp_pkey_t& dh_params, const std::filesystem
 bool write_dh_keypair_to_file (const evp_pkey_t& dh_keypair, const std::filesystem::path& dh_key_path) {
   bio_t out {BIO_new_file(dh_key_path.c_str( ), "w")};
   if ( !out ) {
-    SPDLOG_ERROR("Failed to open {} for writing", dh_key_path);
+    SPDLOG_ERROR("failed to open {} for writing", dh_key_path);
     return false;
   }
   if ( PEM_write_bio_PrivateKey(out, dh_keypair, nullptr, nullptr, 0, nullptr, nullptr) <= 0 ) {
-    SPDLOG_ERROR("Failed to write DH key pair to {}", dh_key_path);
+    SPDLOG_ERROR("failed to write DH key pair to {}", dh_key_path);
     return false;
   }
 
@@ -382,14 +382,14 @@ bool write_dh_keypair_to_file (const evp_pkey_t& dh_keypair, const std::filesyst
 std::optional<evp_pkey_t> load_rsa_private_key (const std::filesystem::path& priv_key_path) {
   const bio_t fp {BIO_new_file(priv_key_path.c_str( ), "r")};
   if ( !fp ) {
-    SPDLOG_ERROR("Failed to open {} for reading", priv_key_path);
+    SPDLOG_ERROR("failed to open {} for reading", priv_key_path);
     return std::nullopt;
   }
 
   evp_pkey_t pkey {PEM_read_bio_PrivateKey(fp, nullptr, nullptr, nullptr)};
 
   if ( !pkey ) {
-    SPDLOG_ERROR("Failed to read RSA private key from {}", priv_key_path);
+    SPDLOG_ERROR("failed to read RSA private key from {}", priv_key_path);
     return std::nullopt;
   }
 
@@ -400,14 +400,14 @@ std::optional<evp_pkey_t> load_rsa_private_key (const std::filesystem::path& pri
 std::optional<evp_pkey_t> load_rsa_public_key (const std::filesystem::path& pub_key_path) {
   const bio_t fp {BIO_new_file(pub_key_path.c_str( ), "r")};
   if ( !fp ) {
-    SPDLOG_ERROR("Failed to open {} for reading", pub_key_path);
+    SPDLOG_ERROR("failed to open {} for reading", pub_key_path);
     return std::nullopt;
   }
 
   evp_pkey_t pkey {PEM_read_bio_PUBKEY(fp, nullptr, nullptr, nullptr)};
 
   if ( !pkey ) {
-    SPDLOG_ERROR("Failed to read RSA public key from {}", pub_key_path);
+    SPDLOG_ERROR("failed to read RSA public key from {}", pub_key_path);
     return std::nullopt;
   }
 
@@ -415,47 +415,47 @@ std::optional<evp_pkey_t> load_rsa_public_key (const std::filesystem::path& pub_
 }
 
 bool create_self_signed_ssl_cert (const std::filesystem::path ssl_cert_path, const std::filesystem::path ssl_dh_path, const std::filesystem::path rsa_priv_key_path) {
-  SPDLOG_DEBUG("Creating self-signed SSL certificate to {}/{}", ssl_cert_path, ssl_dh_path);
+  SPDLOG_DEBUG("creating self-signed SSL certificate to {}/{}", ssl_cert_path, ssl_dh_path);
 
   constexpr long days_valid = 365;
 
   const auto rsa_key = load_rsa_private_key(rsa_priv_key_path);
   if ( !rsa_key ) {
-    SPDLOG_ERROR("Failed to load RSA private key from {}", rsa_priv_key_path);
+    SPDLOG_ERROR("failed to load RSA private key from {}", rsa_priv_key_path);
     return false;
   }
 
   const std::optional<x509_t> cert = create_self_signed_cert(*rsa_key, days_valid);
   if ( !cert ) {
-    SPDLOG_ERROR("Failed to create self-signed SSL certificate");
+    SPDLOG_ERROR("failed to create self-signed SSL certificate");
     return false;
   }
 
   if ( !write_cert_to_file(*cert, ssl_cert_path) ) {
-    SPDLOG_ERROR("Failed to write self-signed SSL certificate to {}", ssl_cert_path);
+    SPDLOG_ERROR("failed to write self-signed SSL certificate to {}", ssl_cert_path);
     return false;
   }
 
   const std::optional<evp_pkey_t> dh_params = generate_dh_params( );
   if ( !dh_params ) {
-    SPDLOG_ERROR("Failed to generate DH parameters");
+    SPDLOG_ERROR("failed to generate DH parameters");
     return false;
   }
   /*
   const std::optional<evp_pkey_t> dh_keypair = generate_dh_keypair(*dh_params);
   if ( !dh_keypair ) {
-    SPDLOG_ERROR("Failed to generate DH key pair");
+    SPDLOG_ERROR("failed to generate DH key pair");
     return false;
   }
   */
 
   if (!write_dh_params_to_file(*dh_params, ssl_dh_path)) {
-    SPDLOG_ERROR("Failed to write DH parameters to {}", ssl_dh_path);
+    SPDLOG_ERROR("failed to write DH parameters to {}", ssl_dh_path);
     return false;
   }
   /*
   if ( !write_dh_keypair_to_file(*dh_keypair, ssl_dh_path) ) {
-    SPDLOG_ERROR("Failed to write DH key pair to {}", ssl_dh_path);
+    SPDLOG_ERROR("failed to write DH key pair to {}", ssl_dh_path);
     return false;
   }
   */

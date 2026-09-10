@@ -93,21 +93,19 @@ rules described above:
 
 ```json
 {
-  "error": "missing mandatory parameter id"
+  "error": "Missing mandatory parameter id."
 }
 ```
 
-**Exception:** authorization failures caused by a malformed (not just expired/invalid)
-JWT — e.g. a garbage `Authorization` header value — currently surface as a `500` response
-with a **plain-text** body (not the `{"error": ...}` JSON shape above), since token
-decoding happens outside the code path that formats errors. A syntactically valid but
-expired or signature-invalid token does go through the normal `401` `{"error": ...}` path.
+Error messages are proper English sentences — capitalized, ending with a period — since
+they're meant to be read by a human (or shown directly in a client UI), not machine-
+matched against; switch on the HTTP status code, never on the text of `error`.
 
 ### Coordinates
 
 Cell coordinates `x` and `y` are **1-based**. Valid values are `1 <= x <= width` and
 `1 <= y <= height`. Out-of-range coordinates result in a `400` error
-(`"coordinates out of range"`).
+(`"Coordinates out of range."`).
 
 ### Authentication / session model
 
@@ -264,7 +262,7 @@ are flagged.
 |--------|----------------------------------------------------------------------------------|
 | `401`  | Missing/invalid/expired `Authorization` bearer token.                             |
 | `403`  | No board is bound to the authenticated client.                                    |
-| `400`  | Board isn't fully revealed yet (`"can't check field when unrevealed cells are left"`). |
+| `400`  | Board isn't fully revealed yet (`"Can't check field when unrevealed cells are left."`). |
 
 ---
 
@@ -300,7 +298,7 @@ whether the auto-reveal flood-fill triggered or not:
 | `cells`  | Array of one or more `{"x": ..., "y": ..., "count": ..., "bomb": ...}` objects. `count` is the number of mines among that cell's neighbors (`-1` if the cell itself was a mine); `bomb` is `true` iff `count < 0`. For `"boom"`, the array has exactly one element and it has no `count`/`bomb` fields. For `"ok"`, the array has one element for a plain reveal (1+ neighboring mines, or the cell was already revealed), or multiple elements — including the originally requested cell — when the auto-reveal flood-fill opened several connected zero-count cells. |
 
 If the cell was already revealed before this call, an additional field
-`"info": "already revealed"` is included in the response (the cell is revealed again,
+`"info": "Already revealed."` is included in the response (the cell is revealed again,
 which is a no-op).
 
 Examples (`format=json`):
@@ -327,8 +325,8 @@ Examples (`format=json`):
 |--------|-------------------------------------------------------------------|
 | `401`  | Missing/invalid/expired `Authorization` bearer token.               |
 | `403`  | No board is bound to the authenticated client.                      |
-| `400`  | `x` or `y` parameter is missing (`"missing mandatory parameter x or y"`). |
-| `400`  | The target cell is flagged (`"can't reveal flagged cell"`).         |
+| `400`  | `x` or `y` parameter is missing (`"Missing mandatory parameter x."` / `"...y."`, whichever is missing — reported one at a time). |
+| `400`  | The target cell is flagged (`"Can't reveal flagged cell."`).        |
 | `400`  | Coordinates are out of range for the board.                          |
 
 ---
@@ -366,8 +364,8 @@ Toggles a flag on a cell (marks/unmarks it as a suspected mine).
 | `400`  | `x` parameter is not a valid number.                                                         |
 | `400`  | `y` parameter is not a valid number.                                                         |
 | `400`  | Coordinates are out of range for the board.                                                   |
-| `400`  | The target cell is already revealed (`"can't flag revealed cell"`).                          |
-| `400`  | No bombs are left to flag and the cell is not already flagged (`"can't flag cell when no bombs left"`). |
+| `400`  | The target cell is already revealed (`"Can't flag revealed cell."`).                          |
+| `400`  | No bombs are left to flag and the cell is not already flagged (`"Can't flag cell when no bombs left."`). |
 
 ---
 
@@ -425,16 +423,12 @@ minesweeper chording risk.
 | Status | Condition                                                                    |
 |--------|------------------------------------------------------------------------------------|
 | `401`  | Missing/invalid/expired `Authorization` bearer token.                                |
-| `403`  | No board is bound to the authenticated client (`"Client not found"`).                |
-| `400`  | `x` or `y` parameter is missing (`"Missing required query parameters: x, y"`).        |
-| `400`  | Coordinates are out of range (`"Invalid coordinates"`).                              |
-| `400`  | The cell isn't revealed yet (`"Cell is not revealed"`).                              |
-| `400`  | The cell is a mine (`"Cell is a bomb"`).                                             |
-| `400`  | Flagged-neighbor count doesn't match mine-neighbor count (`"Number of flags around cell does not match number of bombs"`). |
-
-Note: this plugin's error messages are capitalized, unlike the lowercase style used by
-the core endpoints above — a cosmetic inconsistency between the built-in handlers and
-this particular plugin, not a documented convention to rely on.
+| `403`  | No board is bound to the authenticated client (`"Client not found."`).               |
+| `400`  | `x` or `y` parameter is missing (`"Missing mandatory parameter x."` / `"...y."`).     |
+| `400`  | Coordinates are out of range (`"Invalid coordinates."`).                             |
+| `400`  | The cell isn't revealed yet (`"Cell is not revealed."`).                             |
+| `400`  | The cell is a mine (`"Cell is a bomb."`).                                            |
+| `400`  | Flagged-neighbor count doesn't match mine-neighbor count (`"Number of flags around cell does not match number of bombs."`). |
 
 ---
 

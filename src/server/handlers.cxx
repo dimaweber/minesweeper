@@ -17,19 +17,19 @@ handler_result_t session_new_handler (const parameter_map_t& params) {
     std::errc ec;
     board_id = wbr::str::num<board_id_t, wbr::str::num_match_t::full>(board_id_param, ec);
     if ( ec != std::errc { } ) {
-      return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "invalid board_id parameter"});
+      return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Invalid board_id parameter."});
     }
     if ( board_id == 0 || board_id > api->boards_count( ) ) {
-      return std::unexpected(handler_error_t {restbed::FORBIDDEN, "board_id out of range"});
+      return std::unexpected(handler_error_t {restbed::FORBIDDEN, "Board_id out of range."});
     }
   }
 
   const std::optional<client_id_t> id = api->add_new_client(board_id);
   if ( !id ) {
-    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, "failed to create new client"});
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, "Failed to create new client."});
   }
 
-  SPDLOG_DEBUG("Created new client with id {}", *id);
+  SPDLOG_DEBUG("created new client with id {}", *id);
 
   const auto token = http::auth::create_jwt_for_client(*id);
   if ( !token ) {
@@ -40,7 +40,7 @@ handler_result_t session_new_handler (const parameter_map_t& params) {
 }
 
 handler_result_t board_size_handler (board_i& board, [[maybe_unused]] const parameter_map_t& params) {
-  SPDLOG_DEBUG("Size request: {}x{}", board.width( ), board.height( ));
+  SPDLOG_DEBUG("size request: {}x{}", board.width( ), board.height( ));
   return parameter_map_t {
       {"width",  board.width( ) },
       {"height", board.height( )}
@@ -48,7 +48,7 @@ handler_result_t board_size_handler (board_i& board, [[maybe_unused]] const para
 }
 
 handler_result_t board_bombs_handler (board_i& board, [[maybe_unused]] const parameter_map_t& params) {
-  SPDLOG_DEBUG("Bombs request: {}/{} bombs", board.bombs_count( ), board.bombs_total( ));
+  SPDLOG_DEBUG("bombs request: {}/{} bombs", board.bombs_count( ), board.bombs_total( ));
   return parameter_map_t {
       {"bombs", board.bombs_count( )},
       {"total", board.bombs_total( )}
@@ -56,7 +56,7 @@ handler_result_t board_bombs_handler (board_i& board, [[maybe_unused]] const par
 }
 
 handler_result_t board_fully_revealed_handler (board_i& board, [[maybe_unused]] const parameter_map_t& params) {
-  SPDLOG_DEBUG("Fully revealed request: {} unrevealed cells", board.unrevealed_count( ));
+  SPDLOG_DEBUG("fully revealed request: {} unrevealed cells", board.unrevealed_count( ));
   const bool fully_revealed = board.unrevealed_count( ) == board.bombs_total( ) && board.flags_count( ) == board.bombs_total( );
   return parameter_map_t {{"fully_revealed", fully_revealed}};
 }
@@ -67,17 +67,17 @@ handler_result_t cell_reveal_handler (board_i& board, const parameter_map_t& par
 
   const auto& coord = board.coord(x, y);
   if ( !coord ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "coordinates out of range"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Coordinates out of range."});
   }
 
   auto& cell = board.cell(coord);
   if ( cell.is_flag( ) ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "can't reveal flagged cell"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Can't reveal flagged cell."});
   }
 
   parameter_map_t body;
   if ( cell.is_revealed( ) ) {
-    body.emplace("info", "already revealed");
+    body.emplace("info", "Already revealed.");
   }
 
   if ( cell.is_boom( ) ) {
@@ -122,16 +122,16 @@ handler_result_t cell_flag_handler (board_i& board, const parameter_map_t& param
 
   const auto coord = board.coord(x, y);
   if ( !coord ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "coordinates out of range"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Coordinates out of range."});
   }
 
   auto& cell = board.cell(coord);
   if ( cell.is_revealed( ) ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "can't flag revealed cell"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Can't flag revealed cell."});
   }
 
   if ( !cell.is_flag( ) && board.bombs_count( ) == 0 ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "can't flag cell when no bombs left"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Can't flag cell when no bombs left."});
   }
 
   cell.toggle_flag( );
@@ -151,7 +151,7 @@ handler_result_t board_check_handler (board_i& board, [[maybe_unused]] const par
   // board_fully_revealed_handler's own definition) means exactly bombs_total()
   // cells remain unrevealed, not zero.
   if ( board.unrevealed_count( ) != board.bombs_total( ) ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "can't check field when unrevealed cells are left"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Can't check field when unrevealed cells are left."});
   }
   // A cell is "bad" (loses the game) if it's a mine that either wasn't flagged
   // or got revealed (boomed). A win means none of the mines are bad.

@@ -60,11 +60,11 @@ public:
     logger = std::make_shared<spdlog::logger>("restbed", spdlog::sinks_init_list {console, file});
     logger->set_level(spdlog::level::debug);
 
-    logger->info("Restbed logger started");
+    logger->info("restbed logger started");
   }
 
   void stop ( ) override {
-    logger->info("Restbed logger stopped");
+    logger->info("restbed logger stopped");
     spdlog::drop("restbed");
   }
 
@@ -107,7 +107,7 @@ void initialize_logger (const std::filesystem::path& log_dir) {
     plugin_logger = std::make_shared<spdlog::logger>("plugins", spdlog::sinks_init_list {console, file});
     plugin_logger->set_level(spdlog::level::debug);
 
-    plugin_logger->info("Plugin system logger started");
+    plugin_logger->info("plugin system logger started");
   }
 }
 
@@ -131,7 +131,7 @@ struct library_handle_t {
   bool open (const std::filesystem::path& libpath, int flags = RTLD_LAZY | RTLD_LOCAL) {
     handle_ = ::dlopen(libpath.c_str( ), flags);
     if ( !handle_ ) {
-      plugin_logger->error("Failed to load library {}: {}", libpath, ::dlerror( ));
+      plugin_logger->error("failed to load library {}: {}", libpath, ::dlerror( ));
       return false;
     }
     return true;
@@ -171,7 +171,7 @@ struct library_handle_t {
     }
     void* sym = ::dlsym(handle_, symbol);
     if ( !sym ) {
-      plugin_logger->error("Failed to resolve symbol {}: {}", symbol, ::dlerror( ));
+      plugin_logger->error("failed to resolve symbol {}: {}", symbol, ::dlerror( ));
     }
     return sym;
   }
@@ -210,7 +210,7 @@ struct plugin_handle_t {
   plugin_handle_t (const std::filesystem::path& libpath) {
     library_handle_t r(libpath, RTLD_LAZY | RTLD_LOCAL);
     if ( !r ) {
-      plugin_logger->error("Failed to load plugin {}: {}", libpath, ::dlerror( ));
+      plugin_logger->error("failed to load plugin {}: {}", libpath, ::dlerror( ));
       return;
     }
 
@@ -222,13 +222,13 @@ struct plugin_handle_t {
     // anything else and refuse to load on any mismatch.
     const auto abi_tag_func = r.resolve<abi_tag_func_t>("abi_tag");
     if ( !abi_tag_func ) {
-      plugin_logger->error("Refusing to load plugin {}: no abi_tag() export (built against an ABI-unaware or outdated api.hxx?)", libpath);
+      plugin_logger->error("refusing to load plugin {}: no abi_tag() export (built against an ABI-unaware or outdated api.hxx?)", libpath);
       return;
     }
     const std::string plugin_abi_tag = abi_tag_func( );
     const std::string host_abi_tag   = addon_api_abi_tag( );
     if ( plugin_abi_tag != host_abi_tag ) {
-      plugin_logger->error("Refusing to load plugin {}: ABI mismatch (plugin: '{}', server: '{}')", libpath, plugin_abi_tag, host_abi_tag);
+      plugin_logger->error("refusing to load plugin {}: ABI mismatch (plugin: '{}', server: '{}')", libpath, plugin_abi_tag, host_abi_tag);
       return;
     }
 
@@ -326,29 +326,29 @@ bool load_plugins (const std::filesystem::path& plugins_dir, plugin_api_i& api) 
   if constexpr ( !server_support_plugins( ) )
     return false;
 
-  plugin_logger->info("Loading plugins from {}", plugins_dir);
+  plugin_logger->info("loading plugins from {}", plugins_dir);
   try {
     for ( const auto& entry: std::filesystem::directory_iterator(plugins_dir) ) {
       const auto path = entry.path( );
       if ( !entry.is_regular_file( ) || path.extension( ) != ".so" )
         continue;
-      plugin_logger->info("Loading plugin {}", path);
+      plugin_logger->info("loading plugin {}", path);
       const auto [it, ok] = plugins.emplace(path, plugin_handle_t {path});
       if ( !ok ) {
-        plugin_logger->warn("Plugin {} already loaded, skipping", path);
+        plugin_logger->warn("plugin {} already loaded, skipping", path);
         continue;
       }
       auto& rec = it->second;
       if ( !rec ) {
-        plugin_logger->error("Failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
+        plugin_logger->error("failed to load plugin {}: {}", entry.path( ), ::dlerror( ));
         continue;
       }
       rec.init(api);
-      plugin_logger->info("Plugin {} loaded successfully: {}", rec.name( ), rec.description( ));
+      plugin_logger->info("plugin {} loaded successfully: {}", rec.name( ), rec.description( ));
     }
     return true;
   } catch ( const std::filesystem::filesystem_error& e ) {
-    plugin_logger->error("Failed to load plugins from {}: {}", plugins_dir, e.what( ));
+    plugin_logger->error("failed to load plugins from {}: {}", plugins_dir, e.what( ));
     return false;
   }
 }
@@ -367,14 +367,14 @@ void unload_plugins ( ) {
     return;
   }
 
-  plugin_logger->info("Unloading plugins");
+  plugin_logger->info("unloading plugins");
   for ( auto& [name, rec]: plugins ) {
-    plugin_logger->debug("Unloading plugin {}", name);
+    plugin_logger->debug("unloading plugin {}", name);
     rec.unload( );
   }
 
   plugins.clear( );
-  plugin_logger->debug("All plugins unloaded");
+  plugin_logger->debug("all plugins unloaded");
 }
 }  // namespace plugin
 
@@ -420,14 +420,14 @@ struct shutdown_guard_t {
     // no plugin code is left mapped for api's destruction to jump into.
     plugin::unload_plugins( );
     api.reset( );
-    SPDLOG_DEBUG("Finished minesweeper server");
+    SPDLOG_DEBUG("finished minesweeper server");
   }
 };
 }  // namespace
 
 int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
-  SPDLOG_DEBUG("Starting minesweeper server");
+  SPDLOG_DEBUG("starting minesweeper server");
 
   api = std::make_unique<plugin_api_t>( );
   shutdown_guard_t shutdown_guard;
@@ -521,25 +521,25 @@ int main (int argc, const char* argv[]) {
   api->http_api( )->load_rsa_keys( );
 
   if constexpr ( plugin::server_support_plugins( ) ) {
-    SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
+    SPDLOG_DEBUG("plugin support is enabled, check for plugins available");
     if ( !plugins_dir.empty( ) ) {
-      SPDLOG_INFO("Found plugins directory {}", plugins_dir);
+      SPDLOG_INFO("found plugins directory {}", plugins_dir);
       if ( !plugin::load_plugins(plugins_dir, *api) ) {
-        SPDLOG_ERROR("Failed to load plugins from {}", plugins_dir);
+        SPDLOG_ERROR("failed to load plugins from {}", plugins_dir);
         return EXIT_FAILURE;
       }
     } else {
-      SPDLOG_INFO("No plugins directory specified, skipping plugin loading");
+      SPDLOG_INFO("no plugins directory specified, skipping plugin loading");
     }
   } else {
-    SPDLOG_INFO("Plugin support is disabled, skipping plugin loading");
+    SPDLOG_INFO("plugin support is disabled, skipping plugin loading");
   }
 
   if ( create_ssl_cert ) {
     if ( !std::filesystem::exists(api->http_api( )->ssl_cert_path( )) || !std::filesystem::exists(api->http_api( )->ssl_dh_path( )) ) {
-      SPDLOG_INFO("Creating self-signed SSL certificate and Diffie-Hellman parameters");
+      SPDLOG_INFO("creating self-signed SSL certificate and Diffie-Hellman parameters");
       if ( !create_self_signed_ssl_cert(api->http_api( )->ssl_cert_path( ), api->http_api( )->ssl_dh_path( ), api->http_api( )->rsa_priv_key_path( )) ) {
-        SPDLOG_ERROR("Failed to create self-signed SSL certificate and Diffie-Hellman parameters");
+        SPDLOG_ERROR("failed to create self-signed SSL certificate and Diffie-Hellman parameters");
         return EXIT_FAILURE;
       }
     } else {
@@ -596,14 +596,14 @@ int main (int argc, const char* argv[]) {
   auto& service = shutdown_guard.service;
   service       = std::make_unique<restbed::Service>( );
   service->set_logger(std::make_shared<rb_log>(log_dir));
-  service->set_ready_handler([&] (restbed::Service&) { SPDLOG_INFO("Server is ready to accept connections"); });
+  service->set_ready_handler([&] (restbed::Service&) { SPDLOG_INFO("server is ready to accept connections"); });
 
   auto&            io          = service->get_io_context( );
   auto&            stop_thread = shutdown_guard.stop_thread;
   asio::signal_set signals(*io, SIGINT, SIGTERM);
   signals.async_wait([&service, &stop_thread] (const std::error_code& error, int signal_number) {
     if ( !error ) {
-      SPDLOG_INFO("Received signal {}, stopping server", signal_number);
+      SPDLOG_INFO("received signal {}, stopping server", signal_number);
       // Service::stop() blocks and, internally, resets and re-runs the
       // io_context to drain it. This handler executes ON one of the
       // io_context's own worker threads (nested inside that thread's
@@ -614,7 +614,7 @@ int main (int argc, const char* argv[]) {
       // happens reentrantly.
       stop_thread = std::thread([&service] { service->stop( ); });
     } else {
-      SPDLOG_ERROR("Signal handling error: {}", error.message( ));
+      SPDLOG_ERROR("signal handling error: {}", error.message( ));
     }
   });
 
@@ -639,15 +639,15 @@ int main (int argc, const char* argv[]) {
   api->install_entrypoints(*service);
 
   if ( !no_http ) {
-    SPDLOG_INFO("Listening on port {} for HTTP", port);
+    SPDLOG_INFO("listening on port {} for HTTP", port);
   }
   if ( !no_https ) {
-    SPDLOG_INFO("Listening on port {} for HTTPS", ssl_port);
+    SPDLOG_INFO("listening on port {} for HTTPS", ssl_port);
   }
   try {
     service->start(settings);
   } catch ( std::system_error& e ) {
-    SPDLOG_ERROR("Failed to start server: {}", e.what( ));
+    SPDLOG_ERROR("failed to start server: {}", e.what( ));
     return EXIT_FAILURE;
   }
 

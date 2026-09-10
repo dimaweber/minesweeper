@@ -41,7 +41,7 @@ handler_result_t boards_list_handler ([[maybe_unused]] const parameter_map_t& pa
 }
 
 void install_resource ( ) {
-  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
+  api->log(plugin_api_i::log_level_t::debug, "plugin {}[{}] is adding new resource {}", name( ), version( ), rest_resource_path);
   api->add_resource(rest_resource_path, http_methods_t::GET, simple_handler_adapter<boards_list_handler>);
 }
 }  // namespace
@@ -60,7 +60,7 @@ const char* description ( ) {
 
 void init_plugin ([[maybe_unused]] plugin_api_i& api_iface) {
   api = &api_iface;
-  api->log(plugin_api_i::log_level_t::debug, "Plugin {}[{}] loaded successfully", name( ), version( ));
+  api->log(plugin_api_i::log_level_t::debug, "plugin {}[{}] loaded successfully", name( ), version( ));
 
   api->ready_to_load_resources_signal( ).connect(install_resource);
 }

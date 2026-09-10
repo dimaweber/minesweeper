@@ -31,15 +31,15 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
   const auto coord = board.coord(x, y);
   if ( !coord ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: invalid coordinates: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "invalid coordinates"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Invalid coordinates."});
   }
   if ( !board.cell(coord).is_revealed( ) ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: cell is not revealed: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "cell is not revealed"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Cell is not revealed."});
   }
   if ( board.cell(coord).is_boom( ) ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: cell is a bomb: x={}, y={}", x, y);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "cell is a bomb"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Cell is a bomb."});
   }
   const int flags_around = board.neighbor_flags_count(coord);
   const int bombs_around = board.neighbor_bombs_count(coord);
@@ -49,7 +49,7 @@ handler_result_t cell_check_handler (board_i& board, const parameter_map_t& para
   if ( flags_around != bombs_around ) {
     api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: number of flags around cell does not match number of bombs: x={}, y={}, flags_around={}, bombs_around={}", x, y, flags_around,
         bombs_around);
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "number of flags around cell does not match number of bombs"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "Number of flags around cell does not match number of bombs."});
   }
 
   api->log(plugin_api_i::log_level_t::debug, "cell_check_handler: revealing neighbors of cell x={}, y={}", x, y);

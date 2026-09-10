@@ -230,7 +230,7 @@ constexpr std::string_view  rest_resource_path = "my/thing";
 handler_result_t my_handler (board_i& board, const parameter_map_t& params) {
   const int n = std::get<int>(params.at("n"));
   if ( n > static_cast<int>(board.width( )) ) {
-    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "n out of range"});
+    return std::unexpected(handler_error_t {restbed::BAD_REQUEST, "N out of range."});
   }
   return parameter_map_t {{"status", "ok"}, {"width", board.width( )}};
 }
@@ -501,10 +501,16 @@ Both are fully documented from the client's perspective in `server_api.md`.
   `ready_to_load_resources_signal()` and then nulling your `plugin_api_i*`, matching both
   shipped plugins. Skipping it leaves a live connection into your `.so` for `api`'s
   signal to hold past your own `dlclose`.
-* Prefer lowercase error messages (`"can't reveal flagged cell"`) to match the built-in
-  handlers' style — `cell_check` uses capitalized messages (`"Cell is not revealed"`),
-  which is an inconsistency in the current codebase, not something to imitate.
-* Log liberally at `debug` level inside handlers (both shipped plugins do) — plugin
-  loading/unloading and resource registration happen far from where a request is
-  eventually served, so debug logs are the easiest way to trace what a loaded plugin is
-  doing.
+* Two different casing rules for two different audiences, applied consistently
+  throughout the codebase:
+  * **`handler_error_t` messages (and any other text a client can see in a response
+    body)** are proper English sentences — capitalized, correct grammar, ending with a
+    period: `"Can't reveal flagged cell."`, `"Cell is not revealed."`. This is
+    human-visible text, not a diagnostic code.
+  * **Everything passed to `api->log(...)`** starts lowercase (`"cell_check_handler:
+    revealing neighbor cell {}"`), matching a conventional log-line style, with proper
+    acronyms (`JWT`, `RSA`, `ABI`) keeping their canonical casing regardless of sentence
+    position. Log liberally at `debug` level inside handlers (both shipped plugins do) —
+    plugin loading/unloading and resource registration happen far from where a request
+    is eventually served, so debug logs are the easiest way to trace what a loaded
+    plugin is doing.

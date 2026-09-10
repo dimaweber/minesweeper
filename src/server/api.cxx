@@ -79,7 +79,7 @@ result_t<parameter_map_t> parse_params (restbed::Session& session, const std::ve
     const std::string raw = request->get_query_parameter(std::string(spec.name), "");
     if ( raw.empty( ) ) {
       if ( spec.required ) {
-        return std::unexpected(fmt::format("missing mandatory parameter {}", spec.name));
+        return std::unexpected(fmt::format("Missing mandatory parameter {}.", spec.name));
       }
       out.emplace(std::string(spec.name), spec.default_value);
       continue;
@@ -92,7 +92,7 @@ result_t<parameter_map_t> parse_params (restbed::Session& session, const std::ve
         std::errc  ec;
         const auto value = wbr::str::num<int, wbr::str::num_match_t::full>(raw, ec);
         if ( ec != std::errc { } ) {
-          return std::unexpected(fmt::format("invalid parameter {}", spec.name));
+          return std::unexpected(fmt::format("Invalid parameter {}.", spec.name));
         }
         out.emplace(std::string(spec.name), value);
         break;
@@ -103,7 +103,7 @@ result_t<parameter_map_t> parse_params (restbed::Session& session, const std::ve
         } else if ( raw == "false" || raw == "0" ) {
           out.emplace(std::string(spec.name), false);
         } else {
-          return std::unexpected(fmt::format("invalid parameter {}", spec.name));
+          return std::unexpected(fmt::format("Invalid parameter {}.", spec.name));
         }
         break;
       }
@@ -128,7 +128,7 @@ result_t<std::vector<std::byte>> store_growing (const parameter_t& value) {
       return buffer;
     }
   }
-  return std::unexpected(fmt::format("value too large to serialize (> {} bytes)", max_bytestream_capacity));
+  return std::unexpected(fmt::format("Value too large to serialize (> {} bytes).", max_bytestream_capacity));
 }
 
 // Every board_handler_t/simple_handler_t call gets one buffer this large
@@ -145,12 +145,12 @@ constexpr size_t handler_output_capacity = 1024 * 1024;
 
 handler_result_t unwrap_handler_output (std::span<const std::byte> out_bytes) {
   if ( out_bytes.empty( ) ) {
-    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, "handler failed to produce a response"});
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, "Handler failed to produce a response."});
   }
   parameter_bytestream_t out_bs(const_cast<std::byte*>(out_bytes.data( )), out_bytes.size( ));
   const auto             envelope = out_bs.load( );
   if ( !envelope ) {
-    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("malformed handler response: {}", envelope.error( ))});
+    return std::unexpected(handler_error_t {restbed::INTERNAL_SERVER_ERROR, fmt::format("Malformed handler response: {}.", envelope.error( ))});
   }
   return handler_wire::from_wire(*envelope);
 }
@@ -275,14 +275,14 @@ struct board_t : public board_i {
 
   cell_i& cell (const coord_t& coord) override {
     if ( !coord ) {
-      throw std::out_of_range("Invalid coordinates");
+      throw std::out_of_range("Invalid coordinates.");
     }
     return data_[coord_to_index(coord)];
   }
 
   [[nodiscard]] const cell_i& cell (const coord_t& coord) const override {
     if ( !coord ) {
-      throw std::out_of_range("Invalid coordinates");
+      throw std::out_of_range("Invalid coordinates.");
     }
     return data_[coord_to_index(coord)];
   }
@@ -530,13 +530,13 @@ std::optional<client_id_t> plugin_api_t::add_new_client (board_id_t board_id) {
     const client_id_t id = next_client_id_.fetch_add(1);
     const auto [it, ok]  = clients_.add(id, board_id, board(board_id));
     if ( !ok ) {
-      SPDLOG_ERROR("Failed to add new client with id {}", id);
+      SPDLOG_ERROR("failed to add new client with id {}", id);
       return std::nullopt;
     }
-    SPDLOG_DEBUG("Created new client with id {}", it->first);
+    SPDLOG_DEBUG("created new client with id {}", it->first);
     return id;
   } catch ( const std::out_of_range& e ) {
-    SPDLOG_ERROR("Failed to add new client - board_id {} does not exist: {}", board_id, e.what( ));
+    SPDLOG_ERROR("failed to add new client - board_id {} does not exist: {}", board_id, e.what( ));
     return std::nullopt;
   }
 }
@@ -777,7 +777,7 @@ void plugin_api_t::dispatch (restbed::Session& session, const resource_t& resour
           }
           const auto board = board_for_client(*id);
           if ( !board ) {
-            return std::unexpected(handler_error_t {restbed::FORBIDDEN, "client not found"});
+            return std::unexpected(handler_error_t {restbed::FORBIDDEN, "Client not found."});
           }
           const size_t written = handler(*board, params_bytes->data( ), params_bytes->size( ), out_buffer.data( ), out_buffer.size( ));
           return unwrap_handler_output({out_buffer.data( ), written});
