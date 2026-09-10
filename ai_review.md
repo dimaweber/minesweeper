@@ -259,13 +259,21 @@ going forward, since new code (plugins especially) has no single pattern to copy
   a raw `terminate called after throwing an instance of...` instead of a clean log
   message and exit code.
 
-* **RSA/TLS material defaults to relative paths in the current working directory**
+* ~~**RSA/TLS material defaults to relative paths in the current working directory**
   (`minesweeper_rsa.pem`, `minesweeper.crt`, etc., `api_impl.hxx:158-161`), same for
   `restbed.log`. Fine for local dev; means where you `cd` before invoking `ms_server`
   silently determines where key material lands. Worth defaulting to a proper config/data
   directory (or at minimum resolving relative to `get_exe_directory()`, which the code
   already computes for the plugins directory) before this goes anywhere near a real
-  deployment.
+  deployment.~~ **Addressed**: `--log-dir`/`--data-dir` (both defaulting to
+  `get_exe_directory()/"logs"` and `.../"data"`, auto-created) now govern where
+  `restbed.log`/`plugins.log`/`requests.log` and the RSA keys/SSL cert land; an explicit
+  `--rsa-priv-key`/`--rsa-pub-key`/`--ssl-cert`/`--ssl-dh` still overrides its own path
+  independent of `--data-dir`. Fixing this also surfaced a real bug: `http_api_t`'s
+  constructor used to load RSA keys eagerly, before argv was even parsed, from its own
+  hardcoded default path - no `--rsa-priv-key`/`--data-dir` value could ever actually
+  affect which key material got loaded, only what the path *getters* reported afterward.
+  Split into `load_rsa_keys()`, called once both paths are finalized.
 
 * **Global `extern std::shared_ptr<addon_api_i> api;` is redeclared verbatim in four
   separate translation units** (`handlers.cxx`, `http_auth.cxx`, and each plugin

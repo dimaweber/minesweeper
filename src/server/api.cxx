@@ -29,6 +29,12 @@
 #include "types.hxx"
 
 namespace {
+// Set once by set_requests_log_dir() (called from main(), before the server
+// starts accepting connections) and read lazily by requests_logger() below
+// on the first request it ever logs - by construction, always after
+// main() has set it, never before.
+std::filesystem::path requests_log_dir_ = ".";
+
 // A dedicated request/response audit trail, separate from the app's
 // general log and from restbed's own protocol-level "restbed" logger -
 // one line per request, one per response, file-only (no console sink;
@@ -38,7 +44,7 @@ namespace {
 // the only things that ever need it.
 std::shared_ptr<spdlog::logger> requests_logger ( ) {
   static const std::shared_ptr<spdlog::logger> logger = [] {
-    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("requests.log", true);
+    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>((requests_log_dir_ / "requests.log").string( ), true);
     file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
     auto l = std::make_shared<spdlog::logger>("requests", file);
     l->set_level(spdlog::level::info);
@@ -149,6 +155,10 @@ handler_result_t unwrap_handler_output (std::span<const std::byte> out_bytes) {
   return handler_wire::from_wire(*envelope);
 }
 }  // namespace
+
+void set_requests_log_dir (std::filesystem::path dir) {
+  requests_log_dir_ = std::move(dir);
+}
 
 // Recursive serialization of parameter_t values into each supported wire
 // format. Extracted out of response_t so the (array-aware) recursion lives
@@ -722,7 +732,7 @@ std::pair<std::string, headers_t> response_t::body (content_type_t content_type)
   return {body_, headers_};
 }
 
-http_api_t::http_api_t ( ) {
+void http_api_t::load_rsa_keys ( ) {
   std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 

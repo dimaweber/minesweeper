@@ -6,6 +6,12 @@
 #include "plugins/api.hxx"
 #include "rsa.hxx"
 
+// Where response_t::send()'s "requests" logger (api.cxx) writes
+// requests.log - must be called from main() before the server starts
+// accepting connections, since that logger is lazily constructed on the
+// first request it ever logs.
+void set_requests_log_dir(std::filesystem::path dir);
+
 struct client_context_t {
   board_id_t               board_id_;
   std::shared_ptr<board_i> board_;
@@ -49,11 +55,11 @@ private:
 };
 
 struct http_api_t : public http_api_i {
-  http_api_t ( );
-
   result_t<client_id_t> authorize_client (restbed::Session& session) const override {
     return http::auth::authorize_client(session);
   }
+
+  void load_rsa_keys ( ) override;
 
   std::filesystem::path rsa_priv_key_path ( ) const override {
     return rsa_priv_key_path_;

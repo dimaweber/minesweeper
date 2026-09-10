@@ -27,6 +27,7 @@
 std::unique_ptr<plugin_api_i> api;
 
 class rb_log : public restbed::Logger {
+  std::filesystem::path                log_dir_;
   std::shared_ptr<spdlog::sinks::sink> console;
   std::shared_ptr<spdlog::sinks::sink> file;
   std::shared_ptr<spdlog::logger>      logger;
@@ -44,12 +45,15 @@ class rb_log : public restbed::Logger {
   }
 
 public:
+  explicit rb_log (std::filesystem::path log_dir) : log_dir_ {std::move(log_dir)} {
+  }
+
   void start (const std::shared_ptr<const restbed::Settings>&) override {
     console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>( );
     console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [restbed] %v");
     console->set_level(spdlog::level::debug);
 
-    file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("restbed.log", true);
+    file = std::make_shared<spdlog::sinks::basic_file_sink_mt>((log_dir_ / "restbed.log").string( ), true);
     file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [restbed] %v");
     file->set_level(spdlog::level::trace);
 
@@ -90,13 +94,13 @@ namespace plugin {
 
 std::shared_ptr<spdlog::logger> plugin_logger;
 
-void initialize_logger ( ) {
+void initialize_logger (const std::filesystem::path& log_dir) {
   if ( !plugin_logger ) {
     auto console = std::make_shared<spdlog::sinks::stdout_color_sink_mt>( );
     console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [plugins] %v");
     console->set_level(spdlog::level::debug);
 
-    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("plugins.log", true);
+    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>((log_dir / "plugins.log").string( ), true);
     file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l] [plugins] %v");
     file->set_level(spdlog::level::trace);
 
@@ -353,6 +357,16 @@ void unload_plugins ( ) {
   if constexpr ( !server_support_plugins( ) )
     return;
 
+  // shutdown_guard_t's destructor calls this unconditionally on every exit
+  // path from main(), including ones (--help, a CLI parse error) that
+  // return before initialize_logger() - now deliberately called only after
+  // CLI parsing, once --log-dir is known - ever ran. No logger existing yet
+  // also means load_plugins() was never reached, so there is nothing to
+  // unload either.
+  if ( !plugin_logger ) {
+    return;
+  }
+
   plugin_logger->info("Unloading plugins");
   for ( auto& [name, rec]: plugins ) {
     plugin_logger->debug("Unloading plugin {}", name);
@@ -415,8 +429,6 @@ int main (int argc, const char* argv[]) {
   initialize_log_engine(argc, argv);
   SPDLOG_DEBUG("Starting minesweeper server");
 
-  plugin::initialize_logger( );
-
   api = std::make_unique<plugin_api_t>( );
   shutdown_guard_t shutdown_guard;
 
@@ -429,16 +441,27 @@ int main (int argc, const char* argv[]) {
   bool                      no_http         = false;
   bool                      no_https        = false;
   std::filesystem::path     plugins_dir {get_exe_directory( ) / "plugins"};
-  std::filesystem::path     rsa_priv_key_path {api->http_api( )->rsa_priv_key_path( )};
-  std::filesystem::path     rsa_pub_key_path {api->http_api( )->rsa_pub_key_path( )};
-  std::filesystem::path     ssl_cert_path {api->http_api( )->ssl_cert_path( )};
-  std::filesystem::path     ssl_dh_path {api->http_api( )->ssl_dh_path( )};
+  // log_dir/data_dir default next to the binary, same as plugins_dir above -
+  // otherwise (ai_review.md) restbed.log/plugins.log/requests.log and the
+  // generated RSA keys/SSL cert land wherever the process happened to be
+  // started from, silently determined by an unrelated `cd`. Both are
+  // create_directories()'d below rather than required to pre-exist, unlike
+  // plugins_dir - they're write targets this process owns, not a read-only
+  // input directory.
+  std::filesystem::path log_dir {get_exe_directory( ) / "logs"};
+  std::filesystem::path data_dir {get_exe_directory( ) / "data"};
+  std::filesystem::path rsa_priv_key_path {data_dir / "minesweeper_rsa.pem"};
+  std::filesystem::path rsa_pub_key_path {data_dir / "minesweeper_rsa.pub"};
+  std::filesystem::path ssl_cert_path {data_dir / "minesweeper.crt"};
+  std::filesystem::path ssl_dh_path {data_dir / "minesweeper_dh.pem"};
 
   app.add_option("-p,--port", port, "Port to listen on")->default_val(8080);
   app.add_option("--ssl-port", ssl_port, "Port to listen on for SSL")->default_val(8443);
   app.add_option("-l,--log-level", log_level, "Log level")->transform(CLI::CheckedTransformer(spdlog_level_conversion_table, CLI::ignore_case));
-  [[maybe_unused]] auto rsa_priv_key_opt    = app.add_option("--rsa-priv-key", rsa_priv_key_path, "Path to RSA private key");
-  [[maybe_unused]] auto rsa_pub_key_opt     = app.add_option("--rsa-pub-key", rsa_pub_key_path, "Path to RSA public key");
+  [[maybe_unused]] auto log_dir_opt         = app.add_option("--log-dir", log_dir, "Directory to write log files to")->default_val(log_dir);
+  [[maybe_unused]] auto data_dir_opt        = app.add_option("--data-dir", data_dir, "Directory for generated data files (RSA keys, SSL certificate)")->default_val(data_dir);
+  [[maybe_unused]] auto rsa_priv_key_opt    = app.add_option("--rsa-priv-key", rsa_priv_key_path, "Path to RSA private key")->default_val(rsa_priv_key_path);
+  [[maybe_unused]] auto rsa_pub_key_opt     = app.add_option("--rsa-pub-key", rsa_pub_key_path, "Path to RSA public key")->default_val(rsa_pub_key_path);
   [[maybe_unused]] auto ssl_cert_opt        = app.add_option("--ssl-cert", ssl_cert_path, "Path to SSL certificate")->default_val(ssl_cert_path);
   [[maybe_unused]] auto ssl_dh_opt          = app.add_option("--ssl-dh", ssl_dh_path, "Path to SSL Diffie-Hellman parameters")->default_val(ssl_dh_path);
   [[maybe_unused]] auto create_ssl_cert_opt = app.add_flag("--create-ssl-cert", create_ssl_cert, "Create SSL certificate if it does not exist")->default_val(false);
@@ -461,10 +484,41 @@ int main (int argc, const char* argv[]) {
   CLI11_PARSE(app, argc, argv);
   spdlog::set_level(log_level);
 
+  std::filesystem::create_directories(log_dir);
+  std::filesystem::create_directories(data_dir);
+
+  // --data-dir only supplies the *default* location for generated files -
+  // an explicit --rsa-priv-key/--rsa-pub-key/--ssl-cert/--ssl-dh always wins,
+  // completely independent of --data-dir, since ->count() reports whether
+  // the user actually passed the flag rather than merely observing its
+  // (already data_dir-derived) pre-parse default value.
+  if ( rsa_priv_key_opt->count( ) == 0 ) {
+    rsa_priv_key_path = data_dir / "minesweeper_rsa.pem";
+  }
+  if ( rsa_pub_key_opt->count( ) == 0 ) {
+    rsa_pub_key_path = data_dir / "minesweeper_rsa.pub";
+  }
+  if ( ssl_cert_opt->count( ) == 0 ) {
+    ssl_cert_path = data_dir / "minesweeper.crt";
+  }
+  if ( ssl_dh_opt->count( ) == 0 ) {
+    ssl_dh_path = data_dir / "minesweeper_dh.pem";
+  }
+
+  plugin::initialize_logger(log_dir);
+  set_requests_log_dir(log_dir);
+
   api->http_api( )->set_rsa_priv_key_path(rsa_priv_key_path);
   api->http_api( )->set_rsa_pub_key_path(rsa_pub_key_path);
   api->http_api( )->set_ssl_cert_path(ssl_cert_path);
   api->http_api( )->set_ssl_dh_path(ssl_dh_path);
+  // Must come after both rsa path setters above: load_rsa_keys() reads (or
+  // generates) from whatever they currently are, and unlike the old
+  // http_api_t constructor - which read from its own hardcoded default
+  // path before argv was even parsed, so --rsa-priv-key/--data-dir could
+  // never actually affect which key material got loaded - this is called
+  // only once both are finalized.
+  api->http_api( )->load_rsa_keys( );
 
   if constexpr ( plugin::server_support_plugins( ) ) {
     SPDLOG_DEBUG("Plugin support is enabled, check for plugins available");
@@ -541,7 +595,7 @@ int main (int argc, const char* argv[]) {
 
   auto& service = shutdown_guard.service;
   service       = std::make_unique<restbed::Service>( );
-  service->set_logger(std::make_shared<rb_log>( ));
+  service->set_logger(std::make_shared<rb_log>(log_dir));
   service->set_ready_handler([&] (restbed::Service&) { SPDLOG_INFO("Server is ready to accept connections"); });
 
   auto&            io          = service->get_io_context( );

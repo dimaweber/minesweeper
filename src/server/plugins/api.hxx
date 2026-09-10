@@ -931,6 +931,17 @@ struct http_api_i {
   [[nodiscard]] virtual const std::string& rsa_public_key( ) const  = 0;
 
   virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
+
+  // Reads (or generates, if missing) the key pair from whatever
+  // rsa_priv_key_path()/rsa_pub_key_path() currently are, populating
+  // rsa_private_key()/rsa_public_key(). Deliberately not done implicitly by
+  // the constructor or by set_rsa_priv_key_path()/set_rsa_pub_key_path():
+  // this type is constructed before argv is parsed (there is no path to
+  // configure yet), so eagerly loading at construction time would always
+  // read/generate at whatever the *default* path happens to be, no matter
+  // what --rsa-priv-key/--data-dir the caller later passes - a caller must
+  // finish setting both paths first, then call this once.
+  virtual void load_rsa_keys( ) = 0;
 };
 
 struct plugin_api_i {
