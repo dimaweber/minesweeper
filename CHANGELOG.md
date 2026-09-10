@@ -7,6 +7,31 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Self-describing, checksummed `parameter_bytestream_t` wire header** (`8bfb43e`).
+  `store()`/`load()`'s header (previously just a version byte) now also carries a
+  fixed-width payload length and a CRC32 checksum, closing two gaps flagged as
+  `@todo` comments in the header itself. `check_capacity()` for reads only ever
+  validated against `buffer_size_` (the physical buffer), not against how much of
+  it was actual payload — handing `load()` a buffer bigger than what was
+  `store()`d (its full capacity, or stale bytes from an earlier use) could
+  silently read past the real payload as if it were valid; `load()` now narrows
+  `buffer_size_` to the length it just read before `deserialize()` runs, and
+  separately verifies `deserialize()` consumed exactly that many bytes. The CRC32
+  catches corruption that still happens to parse as syntactically valid (wrong
+  but plausible) data, which the tag/length grammar alone can't. Both fields are
+  fixed-width, outside the recursive `numberX`/`stringN` grammar, same reasoning
+  as `wire_version` (bumped to 2 for this header shape change). Also tightened
+  `write()`'s capacity checks for strings/integers — they used to always reserve
+  the 8-byte worst case even though the point of `numberN`/`stringN` is that most
+  values need far less — via a new `bytes_needed()` helper, which also let
+  `write<integral T>`'s duplicate magnitude computation be removed. Left the
+  other two ideas from the same `@todo` (zip/unzip, a stronger sha256 signature)
+  alone: both would mean a permanent compression/crypto dependency baked into
+  every plugin `.so` via this header, for a same-process boundary with neither an
+  adversary nor a bandwidth problem the CRC32 doesn't already cover — if ever
+  added, they belong as wrappers around `store()`/`load()`'s raw bytes in a
+  future standalone (non-header-only) version of this type, not inside it. Added
+  `RejectsCorruptedPayload` and `IgnoresGarbageBeyondTheStoredPayload` tests.
 - **Route all handler params/results through `parameter_bytestream_t` across the
   plugin ABI** (`fc49b1c`). `plugin_api_i::simple_handler_t`/`board_handler_t`
   crossed the `dlopen` boundary carrying a `parameter_map_t` by value (and
