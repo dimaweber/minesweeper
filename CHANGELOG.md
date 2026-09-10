@@ -7,6 +7,37 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Route all handler params/results through `parameter_bytestream_t` across the
+  plugin ABI** (`fc49b1c`). `plugin_api_i::simple_handler_t`/`board_handler_t`
+  crossed the `dlopen` boundary carrying a `parameter_map_t` by value (and
+  returning one inside `handler_result_t`) — a `std::unordered_map<std::string,
+  std::variant<...>>` whose allocator/heap behavior had to agree between host and
+  plugin, not just its layout. Both are now byte-only: `size_t(*)(..., const
+  std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap)`,
+  returning bytes written (`0` = failure — a valid `store()` is always ≥ 1 byte, an
+  unambiguous sentinel). No `parameter_t`/`parameter_map_t`/`std::string` crosses
+  that function-pointer call as a C++ object anymore. Every existing handler body
+  is unchanged (`handlers.cxx`, `cell_check.cxx`, `boards_list.cxx` still write an
+  ordinary `parameter_map_t`-in/`handler_result_t`-out function); added
+  `handler_wire::to_wire`/`from_wire` (`api.hxx`) converting `handler_result_t`
+  to/from one `parameter_t` envelope (`{"ok":true,"body":...}` or
+  `{"ok":false,"http_code":...,"message":...}`), and
+  `simple_handler_adapter<Handler>`/`board_handler_adapter<Handler>` templates
+  that `load()` params, call the plugin author's function unchanged, catch any
+  exception locally so nothing unwinds across the `.so` boundary, and `store()`
+  the envelope into a host-provided output buffer — `Handler` as a non-type
+  template parameter means each instantiation is an ordinary capture-free
+  function, a valid `simple_handler_t`/`board_handler_t` value. Only the
+  registration call sites changed, e.g. `cell_check_handler` →
+  `board_handler_adapter<cell_check_handler>`. `dispatch()` `store()`s parsed
+  query params once via a growing-buffer retry helper (safe — pure
+  serialization, no side effects) and calls the handler with a fixed 1 MiB output
+  buffer, deliberately *not* retried on failure: a `board_handler_t` like
+  `cell_check_handler` has already mutated the board by the time it tries to
+  serialize its result, so re-invoking it would double those side effects instead
+  of just getting more room. Added `parameter_bytestream_t::size()` to support
+  this. Verified against a running server across every endpoint, including both
+  plugin-hosted handlers.
 - **Harden `parameter_bytestream_t`: bounds-checked, versioned `store()`/`load()`
   returning `result_t`** (`9715093`). `store()`/`load()` are now the only public
   surface — `[[nodiscard]]`, returning `result_t<void>`/`result_t<parameter_t>`
