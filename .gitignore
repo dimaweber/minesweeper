@@ -4,6 +4,7 @@
 # build
 cmake-build-*/
 build/
+__pycache__/
 
 # runtime
 restbed.log
