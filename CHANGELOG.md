@@ -7,6 +7,27 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- **Add `--log-dir`/`--data-dir` to `ms_server`; fix RSA keys loading before argv is
+  parsed** (`545e5c0`). RSA/TLS material and every log file defaulted to relative paths in
+  the current working directory (a gap flagged in `ai_review.md`), so where you `cd`
+  before invoking `ms_server` silently determined where key material and logs landed.
+  Added `--log-dir`/`--data-dir`, both defaulting next to the binary
+  (`get_exe_directory()/"logs"` and `.../"data"`, same pattern `--plugins-dir` already
+  used) and auto-created if missing — unlike `--plugins-dir`, these are write targets this
+  process owns, not a pre-existing input directory. `restbed.log`/`plugins.log`/
+  `requests.log` now go under `--log-dir`; the RSA key pair and SSL cert/DH params default
+  under `--data-dir`, though an explicit `--rsa-priv-key`/`--rsa-pub-key`/`--ssl-cert`/
+  `--ssl-dh` still wins outright, independent of `--data-dir`. Fixing this surfaced a real
+  bug: `http_api_t`'s constructor eagerly loaded the RSA key pair from its own hardcoded
+  default path *before argv was even parsed* — no `--rsa-priv-key`/`--data-dir` value
+  could ever actually affect which key material got loaded, only what the path *getters*
+  reported afterward. Split into `http_api_i::load_rsa_keys()` (appended at the interface's
+  end, no ABI bump needed), called once both paths are finalized post-parse. That reorder
+  surfaced a second bug: moving the plugin logger's setup to after CLI parsing meant
+  `--help` (or any parse error, which returns from `main()` during `CLI11_PARSE` before
+  that setup runs) triggered `shutdown_guard_t`'s destructor calling `unload_plugins()`,
+  which dereferenced the not-yet-initialized plugin logger unconditionally — `ms_server
+  --help` segfaulted. Fixed with a null check (verified under `gdb` before and after).
 - **Add a fixed, reproducible board #11; log all requests/responses; add an
   automated live-replay regression test** (`bd1db71`). `rand()`'s actual output
   isn't standardized across platforms/compilers/libc, so a fixed seed gives no
