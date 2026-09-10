@@ -180,3 +180,40 @@ TEST (ParametersBitstream, RejectsWireVersionMismatch) {
   parameter_bytestream_t pbs_read(buffer);
   EXPECT_FALSE(pbs_read.load( ).has_value( ));
 }
+
+TEST (ParametersBitstream, RejectsCorruptedPayload) {
+  std::array<std::byte, 100> buffer;
+  buffer.fill(std::byte {0xfa});
+
+  parameter_bytestream_t pbs_write(buffer);
+  ASSERT_TRUE(pbs_write.store(parameter_t {std::string("Hello, World!")}).has_value( ));
+
+  // Flip a bit well inside the payload (past the version + length +
+  // checksum header) - the bytes still parse as *some* well-formed
+  // string, so only the checksum catches this.
+  buffer[pbs_write.size( ) - 1] ^= std::byte {0x01};
+
+  parameter_bytestream_t pbs_read(buffer);
+  EXPECT_FALSE(pbs_read.load( ).has_value( ));
+}
+
+TEST (ParametersBitstream, IgnoresGarbageBeyondTheStoredPayload) {
+  // A buffer much bigger than the payload, pre-filled with non-zero
+  // "garbage" - e.g. leftover bytes from an earlier store() into the same
+  // scratch buffer. load() must trust only the length this store() wrote,
+  // not the buffer's full physical size, or it would end up reading that
+  // garbage as if it were real trailing data.
+  std::array<std::byte, 4096> buffer;
+  buffer.fill(std::byte {0xfa});
+
+  parameter_bytestream_t pbs_write(buffer);
+  const parameter_t      p_int = int64_t {42};
+  ASSERT_TRUE(pbs_write.store(p_int).has_value( ));
+
+  // load() against the *entire* oversized buffer, not just the bytes
+  // actually written.
+  parameter_bytestream_t pbs_read(buffer);
+  const auto              out = pbs_read.load( );
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_int);
+}

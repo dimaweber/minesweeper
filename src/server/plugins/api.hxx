@@ -287,26 +287,42 @@ template<typename T>
 using result_t = std::expected<T, std::string>;
 
 struct parameter_bytestream_t {
-  /// @todo: we can add optional
-  ///        - zip/unzip to store/load (can even add flag for zipped/unzipped to header so unzip done automatically)
-  ///        - add optional checksum to store/load (can even add flag for checksum to header so verify done automatically)
-  ///        - sha256 signature to confirm data integrity (can even add flag for signature to header so verify done automatically)
-  ///        - unwind functionality (with stack) so failure will leave buffer in prev state (we don't it now, but actually this will
-  ///           allow to use same buffer for load/store concurrently - when reading of non-finished write will rewind its offset and retry after write is finished) -- usefull for
-  ///           partial reads -- we don't support it now, so this feature is not needed, but can be added later if needed)
+  /// @todo: zip/unzip and a stronger (e.g. sha256) signature don't belong
+  ///        in this class - this header is ABI surface (built into every
+  ///        plugin .so as well as the host), so it can only ever depend on
+  ///        what's already a hard requirement for everyone building
+  ///        against it, and pulling in a compression/crypto library for
+  ///        that would be a permanent dependency tax on every plugin,
+  ///        forever, for a same-process boundary that doesn't actually
+  ///        have an adversary or a bandwidth problem. If/when this type
+  ///        moves to its own library outside the plugin ABI (see below),
+  ///        those belong there instead, as wrappers around the raw
+  ///        store()/load() bytes rather than something this class knows
+  ///        about - compress/sign before store()'s bytes go wherever
+  ///        they're going, decompress/verify before they reach load().
+  /// @todo: this type is genuinely useful beyond the plugin ABI - worth
+  ///        splitting into its own small library some day, at which point
+  ///        the header-only constraint (forced by every plugin .so and
+  ///        the host needing an identical, ABI-tag-checked copy of this
+  ///        exact header) goes away too, opening up things that need a
+  ///        .cxx (e.g. a table-based CRC, or true concurrent partial-read
+  ///        support with an unwind/rewind stack - speculative for now
+  ///        since nothing here has a concurrent producer/consumer on one
+  ///        buffer yet).
   parameter_bytestream_t (std::byte* buffer, size_t buffer_size) : buffer_(buffer), buffer_size_(buffer_size) {
   }
 
   explicit parameter_bytestream_t (std::span<std::byte> buffer) : buffer_(buffer.data( )), buffer_size_(buffer.size( )) {
   }
 
-  // Bump when serialize()/deserialize()'s wire grammar changes shape in a
-  // way that would make an old reader misparse a new writer's bytes (new
-  // type_tag values appended at the end are fine; anything else isn't).
-  // Written/checked once per buffer by store()/load(), outside the
-  // recursive grammar itself - serialize()/deserialize() stay unaware it
-  // exists.
-  static constexpr uint8_t wire_version = 1;
+  // Bump when serialize()/deserialize()'s wire grammar - or store()/load()'s
+  // own header shape below - changes in a way that would make an old reader
+  // misparse a new writer's bytes (new type_tag values appended at the end
+  // are fine; anything else isn't). Written/checked once per buffer by
+  // store()/load(), outside the recursive grammar itself -
+  // serialize()/deserialize() stay unaware it exists. Bumped to 2 for the
+  // length+checksum header fields below.
+  static constexpr uint8_t wire_version = 2;
 
   // Bytes actually written/consumed so far - lets a caller that store()d
   // into a scratch buffer larger than it needed find out how much of it
@@ -318,19 +334,39 @@ struct parameter_bytestream_t {
   // Public entry points: store()/load() are the only way in or out of a
   // buffer, and neither ever lets an exception reach the caller - every
   // internal failure (buffer overrun, malformed tag, version mismatch,
-  // reuse of an already-used instance) comes back as the error side of
-  // result_t, so a caller on the other side of a dlopen boundary can't
-  // forget to handle it and doesn't need to know this type can throw at
-  // all internally. serialize()/deserialize() are the recursive core and
-  // are deliberately private - a caller only ever deals in whole, versioned
-  // buffers.
+  // checksum mismatch, reuse of an already-used instance) comes back as
+  // the error side of result_t, so a caller on the other side of a dlopen
+  // boundary can't forget to handle it and doesn't need to know this type
+  // can throw at all internally. serialize()/deserialize() are the
+  // recursive core and are deliberately private - a caller only ever
+  // deals in whole, versioned buffers.
+  //
+  // The header written here - version, then a fixed-width payload length
+  // and checksum - is deliberately outside serialize()/deserialize()'s own
+  // recursive, compact (numberX-tagged) grammar: it's a single one-time
+  // field per buffer, not a value repeated per array/map element, so the
+  // few extra fixed-width bytes don't matter and a fixed width means
+  // load() can find it without first having to parse anything.
   [[nodiscard]] result_t<void> store (const parameter_t& param) {
     if ( offset_ != 0 ) {
       return std::unexpected(fmt::format("parameter_bytestream_t::store: instance already used (offset {} != 0); use a fresh instance per buffer", offset_));
     }
     try {
       put_byte(wire_version);
+
+      // Length and checksum are only known once serialize() has actually
+      // run, so reserve their slot now and backfill it once the payload
+      // is written.
+      check_capacity(sizeof(uint64_t) + sizeof(uint32_t));
+      const size_t header_pos = offset_;
+      offset_ += sizeof(uint64_t) + sizeof(uint32_t);
+
+      const size_t payload_pos = offset_;
       serialize(param);
+      const size_t payload_len = offset_ - payload_pos;
+
+      as_ref<uint64_t>(buffer_ + header_pos)                      = static_cast<uint64_t>(payload_len);
+      as_ref<uint32_t>(buffer_ + header_pos + sizeof(uint64_t)) = crc32(buffer_ + payload_pos, payload_len);
     } catch ( const std::exception& e ) {
       return std::unexpected(fmt::format("parameter_bytestream_t::store failed: {}", e.what( )));
     }
@@ -346,7 +382,33 @@ struct parameter_bytestream_t {
       if ( version != wire_version ) {
         return std::unexpected(fmt::format("parameter_bytestream_t::load: wire version mismatch (expected {}, got {})", wire_version, version));
       }
-      return deserialize( );
+
+      check_capacity(sizeof(uint64_t) + sizeof(uint32_t));
+      const uint64_t payload_len       = as_ref<uint64_t>(buffer_ + offset_);
+      const uint32_t expected_checksum = as_ref<uint32_t>(buffer_ + offset_ + sizeof(uint64_t));
+      offset_ += sizeof(uint64_t) + sizeof(uint32_t);
+
+      // Bytes past the real payload are whatever was already in the
+      // buffer before this store() wrote it (uninitialized, or leftover
+      // from an earlier use) - buffer_size_ alone can't tell an
+      // oversized buffer from a truncated one, only the length this same
+      // store() wrote can. Narrowing buffer_size_ here makes every
+      // check_capacity() call for the rest of this load() - including
+      // the whole recursive deserialize() descent - fail if it would
+      // read past the real payload, not just past the physical buffer.
+      check_capacity(payload_len);
+      buffer_size_ = offset_ + payload_len;
+
+      if ( crc32(buffer_ + offset_, payload_len) != expected_checksum ) {
+        return std::unexpected(fmt::format("parameter_bytestream_t::load: checksum mismatch ({} byte payload)", payload_len));
+      }
+
+      const size_t     payload_pos = offset_;
+      const parameter_t result     = deserialize( );
+      if ( static_cast<size_t>(offset_) != payload_pos + payload_len ) {
+        return std::unexpected(fmt::format("parameter_bytestream_t::load: {} trailing byte(s) after parsing a well-formed payload", payload_pos + payload_len - static_cast<size_t>(offset_)));
+      }
+      return result;
     } catch ( const std::exception& e ) {
       return std::unexpected(fmt::format("parameter_bytestream_t::load failed: {}", e.what( )));
     }
@@ -426,6 +488,38 @@ private:
     }
   }
 
+  // How many bytes numberN/stringN needs to hold v - used up front so
+  // check_capacity() reserves exactly that much instead of always the
+  // 8-byte worst case, which is what write() actually used to check even
+  // though the whole point of numberN/stringN is that most values need
+  // far less.
+  [[nodiscard]] static constexpr int bytes_needed (uint64_t v) noexcept {
+    int n = 1;
+    for ( ; n < 8 && v >= (uint64_t {1} << (n * 8)); ++n ) {
+    }
+    return n;
+  }
+
+  // Plain bitwise CRC-32 (IEEE 802.3 / zlib polynomial) over the payload -
+  // no table, since payloads here are small enough (KB, not GB) that the
+  // per-byte cost is a non-issue, and a table would mean static
+  // initialization-order reasoning across every plugin that includes this
+  // header for no real benefit. This defends only against accidental
+  // corruption/truncation/version skew inside one host process - not
+  // against a tampering adversary, which is a different (and here,
+  // inapplicable) threat model.
+  [[nodiscard]] static uint32_t crc32 (const std::byte* data, size_t len) noexcept {
+    uint32_t crc = 0xFFFF'FFFFu;
+    for ( size_t i = 0; i < len; ++i ) {
+      crc ^= static_cast<uint8_t>(data[i]);
+      for ( int bit = 0; bit < 8; ++bit ) {
+        const uint32_t mask = -(crc & 1u);
+        crc = (crc >> 1) ^ (0xEDB8'8320u & mask);
+      }
+    }
+    return ~crc;
+  }
+
   void write_tag (type_tag tag) {
     check_capacity(sizeof(type_tag));
     as_ref<type_tag>( ) = tag;
@@ -439,8 +533,7 @@ private:
   template<std::convertible_to<std::string> T>
   void write (const T& str) {
     const size_t str_size = str.size( );
-    check_capacity(sizeof(type_tag) + sizeof(size_t) + str_size); /// @todo: same as with integers write
-                                                                         ///         this checks for longer buffer
+    check_capacity(sizeof(type_tag) + bytes_needed(str_size) + str_size);
     if ( str_size < 0x100 ) {
       write_tag(type_tag::string1);
       put_byte(byte(str_size, 0));
@@ -511,13 +604,9 @@ private:
 
   template<std::integral T>
   void write (T val) {
-    check_capacity(sizeof(type_tag) + sizeof(T)); /// @todo: this checks for bigger space
-                                                         ///        since we use numberX now instead
-                                                         ///        of always int64 -- for example storing
-                                                         ///        int64_t(1) will req 1 byte only, while
-                                                         ///        check use full 8-byte size
+    const uint64_t v = val >= 0 ? static_cast<uint64_t>(val) : -static_cast<uint64_t>(val);
+    check_capacity(sizeof(type_tag) + bytes_needed(v));
     if ( val >= 0 ) {
-      const uint64_t v = static_cast<uint64_t>(val);
       if ( v < 0x1'00 ) {
         write_tag(type_tag::number1);
         put_byte(byte(v, 0));
@@ -572,7 +661,6 @@ private:
         put_byte(byte(v, 7));
       }
     } else {
-      const uint64_t v = -static_cast<uint64_t>(val);
       if ( v < 0x1'00 ) {
         write_tag(type_tag::neg_number1);
         put_byte(byte(v, 0));
@@ -671,10 +759,6 @@ private:
     }
   }
 
-  /// @todo: there is a bug with check_capacity for reads
-  ///         since we have only current read position and full buffer size
-  ///         we check against full buffer size, but actual data could take
-  ///         only part of buffer, thus check will return true while read return trash
   size_t read_len ( ) {
     const type_tag tag = read_tag( );
     switch ( tag ) {
