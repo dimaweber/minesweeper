@@ -130,7 +130,7 @@ cleanly, leaving nothing behind in the moved-from object to cleanse.
 
 - **Key management.** How `encrypt_key`/`sign_key` are generated, distributed, or
   rotated is entirely the caller's problem — this library only consumes them (and, per
-  [Key hygiene](#key-hygiene) above, wipes its own copy once it's done with it; a caller
+  the "Key hygiene" section above, wipes its own copy once it's done with it; a caller
   that keeps its own separate copy around is still responsible for that copy).
 - **Replay protection.** A verified, decrypted blob is exactly what was wrapped — but
   nothing stops the same wrapped blob from being replayed later unless the caller adds

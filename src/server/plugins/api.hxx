@@ -20,33 +20,33 @@
   #include <sigslot/signal.hpp>
 #endif
 
-// Bump this whenever addon_api_i/http_api_i/board_i/cell_i change shape in any way
-// that would make an already-built plugin call the wrong vtable slot (reordering,
-// removing, or changing the signature of an existing virtual method) - new methods
-// appended at the end don't need a bump. See addon_api_abi_tag() below: it folds
-// this in alongside compiler/stdlib identity so a mismatched plugin is refused at
-// load time instead of corrupting memory once called.
+/// Bump this whenever addon_api_i/http_api_i/board_i/cell_i change shape in any way
+/// that would make an already-built plugin call the wrong vtable slot (reordering,
+/// removing, or changing the signature of an existing virtual method) - new methods
+/// appended at the end don't need a bump. See addon_api_abi_tag() below: it folds
+/// this in alongside compiler/stdlib identity so a mismatched plugin is refused at
+/// load time instead of corrupting memory once called.
 #define ADDON_API_ABI_VERSION 1
 
-// Everything crossing the addon_api_i/http_api_i/board_i boundary - including this
-// header itself, since sigslot::signal<> is header-only and its layout is whatever
-// each translation unit's compiler/flags produce - only has a well-defined, agreed
-// layout when the plugin and the server are built with the same compiler, same
-// standard library, and the same version of this header. There is no portable way
-// to make a C++ virtual-interface ABI like this one safe across arbitrary
-// compilers/standard libraries (that needs a plain-C ABI instead); this tag exists
-// only to turn a silent mismatch into a loud, logged refusal to load, rather than a
-// memory-corruption crash somewhere unrelated later on.
-// static, not inline: this must never become an exported, externally-linked
-// symbol. An inline (weak, default-visibility) definition here would be
-// resolved via the process's global symbol scope - and an executable's own
-// exported symbols always win that resolution for anything it dlopen()s,
-// regardless of RTLD_LOCAL on the loaded library. That silently interposes
-// the *host's* copy of this function into every plugin's call to it,
-// making the whole ABI check compare the host's tag against itself no
-// matter what the plugin was actually built with. static (internal
-// linkage) gives every translation unit - the host and each plugin - its
-// own private, non-exported copy that can't be interposed.
+/// Everything crossing the addon_api_i/http_api_i/board_i boundary - including this
+/// header itself, since sigslot::signal<> is header-only and its layout is whatever
+/// each translation unit's compiler/flags produce - only has a well-defined, agreed
+/// layout when the plugin and the server are built with the same compiler, same
+/// standard library, and the same version of this header. There is no portable way
+/// to make a C++ virtual-interface ABI like this one safe across arbitrary
+/// compilers/standard libraries (that needs a plain-C ABI instead); this tag exists
+/// only to turn a silent mismatch into a loud, logged refusal to load, rather than a
+/// memory-corruption crash somewhere unrelated later on.
+/// static, not inline: this must never become an exported, externally-linked
+/// symbol. An inline (weak, default-visibility) definition here would be
+/// resolved via the process's global symbol scope - and an executable's own
+/// exported symbols always win that resolution for anything it dlopen()s,
+/// regardless of RTLD_LOCAL on the loaded library. That silently interposes
+/// the *host's* copy of this function into every plugin's call to it,
+/// making the whole ABI check compare the host's tag against itself no
+/// matter what the plugin was actually built with. static (internal
+/// linkage) gives every translation unit - the host and each plugin - its
+/// own private, non-exported copy that can't be interposed.
 [[nodiscard, maybe_unused]] static std::string addon_api_abi_tag ( ) {
 #if defined(__clang__)
   const std::string compiler = fmt::format("clang-{}", __clang_version__);
@@ -63,9 +63,9 @@
   return fmt::format("addon_api_v{}|{}|cxx{}|glibcxx_abi{}", ADDON_API_ABI_VERSION, compiler, __cplusplus, cxx11_abi);
 }
 
-// Every plugin must invoke this exactly once, at namespace scope, to export the
-// abi_tag() symbol the server checks (via dlsym) before calling init_plugin(). A
-// plugin that doesn't export it is refused just like one missing init_plugin.
+/// Every plugin must invoke this exactly once, at namespace scope, to export the
+/// abi_tag() symbol the server checks (via dlsym) before calling init_plugin(). A
+/// plugin that doesn't export it is refused just like one missing init_plugin.
 #define ADDON_PLUGIN_ABI_TAG( )                          \
   extern "C" const char* abi_tag( ) {                    \
     static const std::string tag = addon_api_abi_tag( ); \
@@ -249,9 +249,9 @@ struct board_i {
 
   virtual int reveal(const coord_t& coord) = 0;
 
-  // Auto-reveal: opening a cell with 0 neighbouring mines recursively opens all
-  // of its neighbours (and, transitively, their neighbours), but this flood-fill
-  // can never open a mine.
+  /// Auto-reveal: opening a cell with 0 neighbouring mines recursively opens all
+  /// of its neighbours (and, transitively, their neighbours), but this flood-fill
+  /// can never open a mine.
   [[nodiscard]] virtual std::vector<reveal_result_t> reveal_cells(const coord_t& coord) = 0;
 
 protected:
@@ -267,15 +267,15 @@ using SessionPtr  = std::shared_ptr<restbed::Session>;
 using ResourcePtr = std::shared_ptr<restbed::Resource>;
 using headers_t   = std::multimap<std::string, std::string>;
 
-// A parameter is either a scalar value, an array of parameters of the same
-// (recursive) type (arrays of arrays are allowed), or a map of named
-// parameters of the same (recursive) type (maps of maps/arrays, and vice
-// versa, are allowed too). This is implemented as a variant deriving struct
-// so that `std::vector<parameter_t>` / `std::unordered_map<std::string,
-// parameter_t>` can appear as alternatives of `parameter_t` itself (allowed
-// since C++17 relaxed the incomplete-type requirements for `std::vector`;
-// libstdc++'s node-based `std::unordered_map` supports incomplete mapped
-// types the same way in practice).
+/// A parameter is either a scalar value, an array of parameters of the same
+/// (recursive) type (arrays of arrays are allowed), or a map of named
+/// parameters of the same (recursive) type (maps of maps/arrays, and vice
+/// versa, are allowed too). This is implemented as a variant deriving struct
+/// so that `std::vector<parameter_t>` / `std::unordered_map<std::string,
+/// parameter_t>` can appear as alternatives of `parameter_t` itself (allowed
+/// since C++17 relaxed the incomplete-type requirements for `std::vector`;
+/// libstdc++'s node-based `std::unordered_map` supports incomplete mapped
+/// types the same way in practice).
 struct parameter_t : std::variant<std::string, int64_t, uint64_t, bool, std::vector<parameter_t>, std::unordered_map<std::string, parameter_t>> {
   using variant::variant;
 };
@@ -315,38 +315,39 @@ struct parameter_bytestream_t {
   explicit parameter_bytestream_t (std::span<std::byte> buffer) : buffer_(buffer.data( )), buffer_size_(buffer.size( )) {
   }
 
-  // Bump when serialize()/deserialize()'s wire grammar - or store()/load()'s
-  // own header shape below - changes in a way that would make an old reader
-  // misparse a new writer's bytes (new type_tag values appended at the end
-  // are fine; anything else isn't). Written/checked once per buffer by
-  // store()/load(), outside the recursive grammar itself -
-  // serialize()/deserialize() stay unaware it exists. Bumped to 2 for the
-  // length+checksum header fields below.
+  /// Bump when serialize()/deserialize()'s wire grammar - or store()/load()'s
+  /// own header shape below - changes in a way that would make an old reader
+  /// misparse a new writer's bytes (new type_tag values appended at the end
+  /// are fine; anything else isn't). Written/checked once per buffer by
+  /// store()/load(), outside the recursive grammar itself -
+  /// serialize()/deserialize() stay unaware it exists. Bumped to 2 for the
+  /// length+checksum header fields below.
   static constexpr uint8_t wire_version = 2;
 
-  // Bytes actually written/consumed so far - lets a caller that store()d
-  // into a scratch buffer larger than it needed find out how much of it
-  // is real payload.
+  /// Bytes actually written/consumed so far - lets a caller that store()d
+  /// into a scratch buffer larger than it needed find out how much of it
+  /// is real payload.
   [[nodiscard]] size_t size ( ) const noexcept {
     return static_cast<size_t>(offset_);
   }
 
-  // Public entry points: store()/load() are the only way in or out of a
-  // buffer, and neither ever lets an exception reach the caller - every
-  // internal failure (buffer overrun, malformed tag, version mismatch,
-  // checksum mismatch, reuse of an already-used instance) comes back as
-  // the error side of result_t, so a caller on the other side of a dlopen
-  // boundary can't forget to handle it and doesn't need to know this type
-  // can throw at all internally. serialize()/deserialize() are the
-  // recursive core and are deliberately private - a caller only ever
-  // deals in whole, versioned buffers.
-  //
-  // The header written here - version, then a fixed-width payload length
-  // and checksum - is deliberately outside serialize()/deserialize()'s own
-  // recursive, compact (numberX-tagged) grammar: it's a single one-time
-  // field per buffer, not a value repeated per array/map element, so the
-  // few extra fixed-width bytes don't matter and a fixed width means
-  // load() can find it without first having to parse anything.
+  /// @{
+  /// Public entry points: store()/load() are the only way in or out of a
+  /// buffer, and neither ever lets an exception reach the caller - every
+  /// internal failure (buffer overrun, malformed tag, version mismatch,
+  /// checksum mismatch, reuse of an already-used instance) comes back as
+  /// the error side of result_t, so a caller on the other side of a dlopen
+  /// boundary can't forget to handle it and doesn't need to know this type
+  /// can throw at all internally. serialize()/deserialize() are the
+  /// recursive core and are deliberately private - a caller only ever
+  /// deals in whole, versioned buffers.
+  ///
+  /// The header written here - version, then a fixed-width payload length
+  /// and checksum - is deliberately outside serialize()/deserialize()'s own
+  /// recursive, compact (numberX-tagged) grammar: it's a single one-time
+  /// field per buffer, not a value repeated per array/map element, so the
+  /// few extra fixed-width bytes don't matter and a fixed width means
+  /// load() can find it without first having to parse anything.
   [[nodiscard]] result_t<void> store (const parameter_t& param) {
     if ( offset_ != 0 ) {
       return std::unexpected(fmt::format("parameter_bytestream_t::store: instance already used (offset {} != 0); use a fresh instance per buffer", offset_));
@@ -413,12 +414,13 @@ struct parameter_bytestream_t {
       return std::unexpected(fmt::format("parameter_bytestream_t::load failed: {}", e.what( )));
     }
   }
+  /// @}
 
 private:
-  // Internal-only: serialize()/deserialize()'s recursive descent unwinds
-  // through this on any failure. It never crosses store()/load() - both
-  // catch std::exception and convert to result_t's error side before
-  // returning.
+  /// Internal-only: serialize()/deserialize()'s recursive descent unwinds
+  /// through this on any failure. It never crosses store()/load() - both
+  /// catch std::exception and convert to result_t's error side before
+  /// returning.
   struct error : std::runtime_error {
     using std::runtime_error::runtime_error;
   };
@@ -478,21 +480,21 @@ private:
     return *as_ptr<T>(buffer_ + offset_);
   }
 
-  // Every read/write primitive below funnels through here first, so a
-  // truncated, corrupted, or maliciously short buffer fails loudly right
-  // where it would otherwise read/write out of bounds, instead of silently
-  // touching memory past buffer_size_.
+  /// Every read/write primitive below funnels through here first, so a
+  /// truncated, corrupted, or maliciously short buffer fails loudly right
+  /// where it would otherwise read/write out of bounds, instead of silently
+  /// touching memory past buffer_size_.
   void check_capacity (size_t needed) const {
     if ( static_cast<size_t>(offset_) + needed > buffer_size_ ) {
       throw error(fmt::format("parameter_bytestream_t: buffer overrun at offset {} (need {} more bytes, capacity {})", offset_, needed, buffer_size_));
     }
   }
 
-  // How many bytes numberN/stringN needs to hold v - used up front so
-  // check_capacity() reserves exactly that much instead of always the
-  // 8-byte worst case, which is what write() actually used to check even
-  // though the whole point of numberN/stringN is that most values need
-  // far less.
+  /// How many bytes numberN/stringN needs to hold v - used up front so
+  /// check_capacity() reserves exactly that much instead of always the
+  /// 8-byte worst case, which is what write() actually used to check even
+  /// though the whole point of numberN/stringN is that most values need
+  /// far less.
   [[nodiscard]] static constexpr int bytes_needed (uint64_t v) noexcept {
     int n = 1;
     for ( ; n < 8 && v >= (uint64_t {1} << (n * 8)); ++n ) {
@@ -500,14 +502,14 @@ private:
     return n;
   }
 
-  // Plain bitwise CRC-32 (IEEE 802.3 / zlib polynomial) over the payload -
-  // no table, since payloads here are small enough (KB, not GB) that the
-  // per-byte cost is a non-issue, and a table would mean static
-  // initialization-order reasoning across every plugin that includes this
-  // header for no real benefit. This defends only against accidental
-  // corruption/truncation/version skew inside one host process - not
-  // against a tampering adversary, which is a different (and here,
-  // inapplicable) threat model.
+  /// Plain bitwise CRC-32 (IEEE 802.3 / zlib polynomial) over the payload -
+  /// no table, since payloads here are small enough (KB, not GB) that the
+  /// per-byte cost is a non-issue, and a table would mean static
+  /// initialization-order reasoning across every plugin that includes this
+  /// header for no real benefit. This defends only against accidental
+  /// corruption/truncation/version skew inside one host process - not
+  /// against a tampering adversary, which is a different (and here,
+  /// inapplicable) threat model.
   [[nodiscard]] static uint32_t crc32 (const std::byte* data, size_t len) noexcept {
     uint32_t crc = 0xFFFF'FFFFu;
     for ( size_t i = 0; i < len; ++i ) {
@@ -932,15 +934,15 @@ struct http_api_i {
 
   virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
 
-  // Reads (or generates, if missing) the key pair from whatever
-  // rsa_priv_key_path()/rsa_pub_key_path() currently are, populating
-  // rsa_private_key()/rsa_public_key(). Deliberately not done implicitly by
-  // the constructor or by set_rsa_priv_key_path()/set_rsa_pub_key_path():
-  // this type is constructed before argv is parsed (there is no path to
-  // configure yet), so eagerly loading at construction time would always
-  // read/generate at whatever the *default* path happens to be, no matter
-  // what --rsa-priv-key/--data-dir the caller later passes - a caller must
-  // finish setting both paths first, then call this once.
+  /// Reads (or generates, if missing) the key pair from whatever
+  /// rsa_priv_key_path()/rsa_pub_key_path() currently are, populating
+  /// rsa_private_key()/rsa_public_key(). Deliberately not done implicitly by
+  /// the constructor or by set_rsa_priv_key_path()/set_rsa_pub_key_path():
+  /// this type is constructed before argv is parsed (there is no path to
+  /// configure yet), so eagerly loading at construction time would always
+  /// read/generate at whatever the *default* path happens to be, no matter
+  /// what --rsa-priv-key/--data-dir the caller later passes - a caller must
+  /// finish setting both paths first, then call this once.
   virtual void load_rsa_keys( ) = 0;
 };
 
@@ -954,11 +956,11 @@ struct plugin_api_i {
     parameter_t      default_value = std::string { };
   };
 
-  // A handler's result on success is the set of properties to send back to the
-  // client (folded into the response body by the host); on failure it's the
-  // HTTP status code plus a message - mirroring rest_api_response_i's
-  // send()/send_error() split without the handler ever touching a response
-  // object, restbed::Session, or content-type/format at all.
+  /// A handler's result on success is the set of properties to send back to the
+  /// client (folded into the response body by the host); on failure it's the
+  /// HTTP status code plus a message - mirroring rest_api_response_i's
+  /// send()/send_error() split without the handler ever touching a response
+  /// object, restbed::Session, or content-type/format at all.
   struct handler_error_t {
     int         http_code;
     std::string message;
@@ -966,31 +968,33 @@ struct plugin_api_i {
 
   using handler_result_t = std::expected<parameter_map_t, handler_error_t>;
 
-  // Two distinct handler shapes instead of one signature plus an
-  // "auth required" bool a plugin author could set wrong: a handler that
-  // takes a board_i& can only be registered through the board_handler_t
-  // overload of add_resource, and the host authenticates the caller and
-  // resolves *their* board before ever calling it - there is no path that
-  // hands a board_i& to a handler without going through authentication
-  // first. A resource that needs neither (or resolves its own board some
-  // other way, e.g. by an explicit id) uses simple_handler_t instead. The
-  // handler's own type is the declaration of what it needs, not a
-  // separately-settable (and separately-forgettable) flag.
-  //
-  // Both shapes speak strictly in bytes: params_buf/params_len is a
-  // store()d parameter_t (a parameter_map_t at the top level) prepared by
-  // the host; the handler store()s its own handler_result_t - wrapped via
-  // handler_wire::to_wire() - into out_buf (out_cap bytes) and returns how
-  // many bytes it wrote, or 0 on any failure (a valid store() is always
-  // at least 1 byte, so 0 is an unambiguous sentinel). No parameter_t,
-  // parameter_map_t, or std::string crosses this function-pointer call as
-  // a C++ object - a plugin author still writes an ordinary
-  // parameter_map_t-in/handler_result_t-out function, and registers it
-  // through simple_handler_adapter<Handler>/board_handler_adapter<Handler>
-  // (below), which does the store()/load() at this boundary so no plugin
-  // has to.
+  /// @{
+  /// Two distinct handler shapes instead of one signature plus an
+  /// "auth required" bool a plugin author could set wrong: a handler that
+  /// takes a board_i& can only be registered through the board_handler_t
+  /// overload of add_resource, and the host authenticates the caller and
+  /// resolves *their* board before ever calling it - there is no path that
+  /// hands a board_i& to a handler without going through authentication
+  /// first. A resource that needs neither (or resolves its own board some
+  /// other way, e.g. by an explicit id) uses simple_handler_t instead. The
+  /// handler's own type is the declaration of what it needs, not a
+  /// separately-settable (and separately-forgettable) flag.
+  ///
+  /// Both shapes speak strictly in bytes: params_buf/params_len is a
+  /// store()d parameter_t (a parameter_map_t at the top level) prepared by
+  /// the host; the handler store()s its own handler_result_t - wrapped via
+  /// handler_wire::to_wire() - into out_buf (out_cap bytes) and returns how
+  /// many bytes it wrote, or 0 on any failure (a valid store() is always
+  /// at least 1 byte, so 0 is an unambiguous sentinel). No parameter_t,
+  /// parameter_map_t, or std::string crosses this function-pointer call as
+  /// a C++ object - a plugin author still writes an ordinary
+  /// parameter_map_t-in/handler_result_t-out function, and registers it
+  /// through `simple_handler_adapter<Handler>`/`board_handler_adapter<Handler>`
+  /// (below), which does the store()/load() at this boundary so no plugin
+  /// has to.
   using simple_handler_t = size_t (*)(const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
   using board_handler_t  = size_t (*)(board_i& board, const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
+  /// @}
 
   struct resource_t {
     const std::string                                     path;
@@ -1019,12 +1023,12 @@ struct plugin_api_i {
 
   [[nodiscard]] virtual size_t boards_count( ) const noexcept            = 0;
   virtual board_id_t           add_board(std::unique_ptr<board_i> board) = 0;
-  // Plain C-style callback + opaque user_data, deliberately not std::function
-  // or a capturing lambda: those cross the plugin/app ABI boundary as
-  // type-erased objects whose manager/invoker code is compiled wherever the
-  // callable is instantiated (i.e. inside the plugin's .so). If such an
-  // object outlives dlclose()-ing that plugin, destroying or invoking it
-  // jumps into unmapped memory. user_data carries per-call context instead.
+  /// Plain C-style callback + opaque user_data, deliberately not std::function
+  /// or a capturing lambda: those cross the plugin/app ABI boundary as
+  /// type-erased objects whose manager/invoker code is compiled wherever the
+  /// callable is instantiated (i.e. inside the plugin's .so). If such an
+  /// object outlives dlclose()-ing that plugin, destroying or invoking it
+  /// jumps into unmapped memory. user_data carries per-call context instead.
   using board_manipulation_func_t                                                  = void (*)(void* user_data, board_id_t, board_i&);
   virtual void     for_each_board(board_manipulation_func_t func, void* user_data) = 0;
   virtual board_i& board(board_id_t board_id)                                      = 0;
@@ -1043,15 +1047,15 @@ struct plugin_api_i {
   virtual void               on_ready_to_load_resources( )     = 0;
 #endif
 
-  // Same as create_board(), but with an explicit, caller-supplied mine
-  // layout instead of one placed by rand() - useful for a reproducible
-  // board (e.g. one matched against a real client session for testing),
-  // since rand()'s actual output isn't standardized across
-  // platforms/compilers/libc and gives no portability guarantee even with
-  // a fixed seed. Appended here (after every other method, including the
-  // #if USE_PALSIGSLOT block) rather than next to create_board() so it's
-  // unconditionally the last vtable slot regardless of that macro - an
-  // append at the true end never needs an ADDON_API_ABI_VERSION bump.
+  /// Same as create_board(), but with an explicit, caller-supplied mine
+  /// layout instead of one placed by rand() - useful for a reproducible
+  /// board (e.g. one matched against a real client session for testing),
+  /// since rand()'s actual output isn't standardized across
+  /// platforms/compilers/libc and gives no portability guarantee even with
+  /// a fixed seed. Appended here (after every other method, including the
+  /// `#if USE_PALSIGSLOT` block) rather than next to create_board() so it's
+  /// unconditionally the last vtable slot regardless of that macro - an
+  /// append at the true end never needs an ADDON_API_ABI_VERSION bump.
   virtual std::unique_ptr<board_i> create_fixed_board(std::size_t width, std::size_t height, std::vector<coord_t> mines) = 0;
 };
 
@@ -1060,10 +1064,10 @@ using param_spec_t     = plugin_api_i::param_spec_t;
 using handler_error_t  = plugin_api_i::handler_error_t;
 using handler_result_t = plugin_api_i::handler_result_t;
 
-// Converts a handler_result_t to/from the single parameter_t envelope that
-// actually crosses add_resource's simple_handler_t/board_handler_t
-// boundary: {"ok": true, "body": <parameter_map_t>} on success,
-// {"ok": false, "http_code": <int64>, "message": <string>} on failure.
+/// Converts a handler_result_t to/from the single parameter_t envelope that
+/// actually crosses add_resource's simple_handler_t/board_handler_t
+/// boundary: {"ok": true, "body": `<parameter_map_t>`} on success,
+/// {"ok": false, "http_code": `<int64>`, "message": `<string>`} on failure.
 namespace handler_wire {
 inline parameter_t to_wire (const handler_result_t& result) {
   if ( result ) {
@@ -1079,11 +1083,11 @@ inline parameter_t to_wire (const handler_result_t& result) {
   };
 }
 
-// A malformed envelope (missing key, wrong alternative - only possible
-// from a broken or version-mismatched handler) is reported the same way a
-// handler-reported failure is: there is no separate "the wire itself was
-// bad" channel, dispatch() only ever needs to know "serve this body" or
-// "send this error".
+/// A malformed envelope (missing key, wrong alternative - only possible
+/// from a broken or version-mismatched handler) is reported the same way a
+/// handler-reported failure is: there is no separate "the wire itself was
+/// bad" channel, dispatch() only ever needs to know "serve this body" or
+/// "send this error".
 inline handler_result_t from_wire (const parameter_t& wire) {
   try {
     const auto& m = std::get<parameter_map_t>(wire);
@@ -1100,14 +1104,15 @@ inline handler_result_t from_wire (const parameter_t& wire) {
 }
 }  // namespace handler_wire
 
-// Registers an ordinary parameter_map_t-in/handler_result_t-out function
-// (the shape every handler in handlers.cxx/cell_check.cxx/boards_list.cxx
-// actually writes) as a plugin_api_i::simple_handler_t/board_handler_t -
-// the byte-only shape the ABI boundary requires. Handler is a non-type
-// template parameter (a plain function, possibly with internal linkage -
-// both are fine as of C++11), so each instantiation is itself an ordinary,
-// capture-free function - a valid simple_handler_t/board_handler_t value,
-// compiled by whichever side (host or plugin) registers it.
+/// @{
+/// Registers an ordinary parameter_map_t-in/handler_result_t-out function
+/// (the shape every handler in handlers.cxx/cell_check.cxx/boards_list.cxx
+/// actually writes) as a plugin_api_i::simple_handler_t/board_handler_t -
+/// the byte-only shape the ABI boundary requires. Handler is a non-type
+/// template parameter (a plain function, possibly with internal linkage -
+/// both are fine as of C++11), so each instantiation is itself an ordinary,
+/// capture-free function - a valid simple_handler_t/board_handler_t value,
+/// compiled by whichever side (host or plugin) registers it.
 template<handler_result_t (*Handler)(const parameter_map_t& params)>
 size_t simple_handler_adapter (const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap) {
   parameter_bytestream_t params_bs(const_cast<std::byte*>(params_buf), params_len);
@@ -1147,3 +1152,4 @@ size_t board_handler_adapter (board_i& board, const std::byte* params_buf, size_
   const auto             stored = out_bs.store(handler_wire::to_wire(result));
   return stored ? out_bs.size( ) : 0;
 }
+/// @}

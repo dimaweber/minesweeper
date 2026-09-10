@@ -6,6 +6,10 @@ cmake-build-*/
 build/
 __pycache__/
 
+# generated docs (see Doxyfile, libs/envelope/Doxyfile)
+/docs/
+libs/envelope/docs/
+
 # runtime
 restbed.log
 plugins.log

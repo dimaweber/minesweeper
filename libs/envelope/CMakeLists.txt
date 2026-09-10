@@ -32,3 +32,18 @@ if (ENVELOPE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif ()
+
+# `cmake --build . --target envelope_docs` regenerates ./docs/html/ from
+# this library's own Doxyfile (include/) - deliberately separate from the
+# parent project's `docs` target/Doxyfile, same reasoning as everything
+# else about keeping this directory self-contained. Optional: doesn't fail
+# configure if Doxygen isn't installed, and isn't part of the default
+# `all` target.
+find_package(Doxygen)
+if (DOXYGEN_FOUND)
+    add_custom_target(envelope_docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            COMMENT "Generating HTML documentation with Doxygen into libs/envelope/docs/html/"
+            VERBATIM)
+endif ()

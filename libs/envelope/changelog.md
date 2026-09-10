@@ -46,4 +46,4 @@ entry below, until this directory is extracted into its own repository.
   aggregate (its own designated-initializer syntax, `config_t{.compress = true, ...}`,
   still works unchanged) - giving it its own destructor instead would have disqualified
   it from being an aggregate at all, which is why the cleansing logic lives on these two
-  field types instead. See [readme.md's "Key hygiene"](readme.md#key-hygiene) section.
+  field types instead. See [readme.md](readme.md)'s "Key hygiene" section.

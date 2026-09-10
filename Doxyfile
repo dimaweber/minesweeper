@@ -1,0 +1,46 @@
+# Doxygen configuration for the minesweeper project itself (src/, inc/).
+# libs/envelope/ has its own separate Doxyfile (libs/envelope/Doxyfile) -
+# it's meant to be extractable into its own repository, so its
+# documentation is generated independently rather than folded in here.
+#
+# This is a deliberately minimal Doxyfile - only the settings that differ
+# from doxygen's built-in defaults are listed; run `doxygen -g -` to see
+# every available option and its default. Regenerate HTML output with:
+#   doxygen Doxyfile
+# (or the `docs` CMake target, if Doxygen was found at configure time).
+# Output goes to ./docs/html/ (gitignored - generated, not committed).
+
+PROJECT_NAME           = "Minesweeper"
+PROJECT_BRIEF          = "A REST API minesweeper server, plugin system, and TUI client"
+OUTPUT_DIRECTORY       = docs
+
+INPUT                  = src inc
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hxx *.cxx *.h *.hpp *.cpp
+EXTENSION_MAPPING       = hxx=C++ cxx=C++
+
+# Only entities that actually have a doc comment are documented -
+# annotation is being added incrementally (see the Doxygen comment style
+# in src/server/plugins/api.hxx for the pattern to follow), so this avoids
+# flooding the output with "no description" stubs for everything that
+# hasn't been annotated yet. Correspondingly, don't warn about the (many,
+# for now) undocumented entities either - only about doc comments that are
+# themselves malformed.
+EXTRACT_ALL             = NO
+WARN_IF_UNDOCUMENTED    = NO
+WARN_IF_DOC_ERROR       = YES
+
+JAVADOC_AUTOBRIEF       = YES
+
+GENERATE_HTML           = YES
+GENERATE_LATEX          = NO
+
+# Off, not just unset-to-default: this environment's graphviz (2.42.4, from
+# 2020) segfaults on the `id="..."` attributes this doxygen version (1.15)
+# emits for SVG click targets - reproduces with `dot` invoked directly on
+# a generated .dot file, so it's a graphviz/doxygen version-skew issue, not
+# anything about this project's content. Safe to flip back to YES in an
+# environment with a newer graphviz.
+HAVE_DOT                = NO
+
+QUIET                   = YES

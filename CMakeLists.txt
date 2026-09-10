@@ -305,3 +305,20 @@ if (BUILD_TESTS AND SERVER_SUPPORT_PLUGINS)
         message(WARNING "Python3 interpreter not found - skipping live_replay test")
     endif ()
 endif ()
+
+# `cmake --build . --target docs` regenerates ./docs/html/ from Doxyfile
+# (src/, inc/) - optional (doesn't fail configure if Doxygen isn't
+# installed), and not part of the default `all` target, so it never slows
+# down or breaks an ordinary build. libs/envelope/ has its own separate
+# `envelope_docs` target (libs/envelope/CMakeLists.txt) for the same
+# reason its Doxyfile is separate - see the note there.
+find_package(Doxygen)
+if (DOXYGEN_FOUND)
+    add_custom_target(docs
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Doxyfile
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Generating HTML documentation with Doxygen into docs/html/"
+            VERBATIM)
+else ()
+    message(STATUS "Doxygen not found - the 'docs' target will not be available")
+endif ()
