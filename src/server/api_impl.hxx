@@ -161,6 +161,7 @@ struct plugin_api_t : public plugin_api_i {
   }
 
   std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) override;
+  std::unique_ptr<board_i> create_fixed_board(std::size_t width, std::size_t height, std::vector<coord_t> mines) override;
 
   http_api_i* http_api ( ) override {
     return &http_api_;

@@ -500,6 +500,30 @@ int main (int argc, const char* argv[]) {
     }
   }
 
+  // Board #11: a fixed, reproducible layout instead of rand()-placed
+  // mines - rand()'s actual output isn't standardized across
+  // platforms/compilers/libc, so a fixed seed wouldn't reproduce the same
+  // board elsewhere anyway. Mines transcribed from a real client session
+  // screenshot; verified cell-by-cell against every neighbor-bomb-count
+  // digit shown in it (99 of the 10x10=100 cells matched exactly - the
+  // 100th, (10,10), was the screenshot's cursor-selected cell, rendered
+  // blank regardless of its actual count).
+  {
+    const std::vector<coord_t> fixed_board_mines {
+        {2, 1 }, {4, 1},
+        {7, 2 },
+        {7, 4 },
+        {5, 5 },
+        {2, 6 }, {9, 6},
+        {5, 9 }, {10, 9},
+        {1, 10},
+    };
+    auto p = api->create_fixed_board(10, 10, fixed_board_mines);
+    if ( p ) {
+      api->add_board(std::move(p));
+    }
+  }
+
   const auto settings = std::make_shared<restbed::Settings>( );
   settings->set_port(port);
   settings->set_worker_limit(4);

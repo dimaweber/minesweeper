@@ -1031,6 +1031,17 @@ struct plugin_api_i {
   virtual sigslot::signal<>& ready_to_load_resources_signal( ) = 0;
   virtual void               on_ready_to_load_resources( )     = 0;
 #endif
+
+  // Same as create_board(), but with an explicit, caller-supplied mine
+  // layout instead of one placed by rand() - useful for a reproducible
+  // board (e.g. one matched against a real client session for testing),
+  // since rand()'s actual output isn't standardized across
+  // platforms/compilers/libc and gives no portability guarantee even with
+  // a fixed seed. Appended here (after every other method, including the
+  // #if USE_PALSIGSLOT block) rather than next to create_board() so it's
+  // unconditionally the last vtable slot regardless of that macro - an
+  // append at the true end never needs an ADDON_API_ABI_VERSION bump.
+  virtual std::unique_ptr<board_i> create_fixed_board(std::size_t width, std::size_t height, std::vector<coord_t> mines) = 0;
 };
 
 using param_type_t     = plugin_api_i::param_type_t;

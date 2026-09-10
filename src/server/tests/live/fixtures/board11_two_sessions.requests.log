@@ -1,0 +1,198 @@
+[2026-09-10 11:28:15.757] POST /session/new?board_id=11
+[2026-09-10 11:28:15.757] -> 200 {"token":"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRfaWQiOiIxIiwiZXhwIjoxNzg5MTE1Mjk1LCJpYXQiOjE3ODkwMjg4OTUsImlzcyI6Im1pbmVzd2VlcGVyIiwianRpIjoibWluZXN3ZWVwZXJfc2VydmVyIn0.lKF2SxjQaKiWGiUpP1bZqaSHEL7LFMxmMKek4uCTzPAyrN11Ha5FwaM4sSM51W-5uo1imfO_W21VNeks-vnHgOa9nQM8hRK7v0CwoZnSpG316DHeYHagbg_tVUxskMVvQf0VLqZPRRlMOdIK0_ajRBuupR2w0mBfpKX5H1OBZxJpxT4ZQjcrWjKFa6rbjNY7LQ-ui-OGfLcPke3KX3CGRJtwpLaas_u9wnaorixK1UjaHha0Zlj3OPYlpV2N0bFRarEOGNL4kouD1F-CMUjp_dfs6RrCdF9yHy41lMXbvOgVYnQU3te6ug9z4Z63VUe85HCVdGr4AM_7wYEAvRCY4g"}
+[2026-09-10 11:28:15.760] GET /board/size
+[2026-09-10 11:28:15.760] -> 200 {"height":10,"width":10}
+[2026-09-10 11:28:15.762] GET /board/bombs
+[2026-09-10 11:28:15.762] -> 200 {"bombs":10,"total":10}
+[2026-09-10 11:28:15.765] GET /board/bombs
+[2026-09-10 11:28:15.765] -> 200 {"bombs":10,"total":10}
+[2026-09-10 11:28:28.663] POST /cell/flag?x=1&y=1
+[2026-09-10 11:28:28.663] -> 200 {"flagged":true,"status":"ok","x":1,"y":1}
+[2026-09-10 11:28:28.666] GET /board/bombs
+[2026-09-10 11:28:28.666] -> 200 {"bombs":9,"total":10}
+[2026-09-10 11:28:28.668] GET /board/fully_revealed
+[2026-09-10 11:28:28.668] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:31.803] POST /cell/flag?x=1&y=1
+[2026-09-10 11:28:31.803] -> 200 {"flagged":false,"status":"ok","x":1,"y":1}
+[2026-09-10 11:28:31.806] GET /board/bombs
+[2026-09-10 11:28:31.806] -> 200 {"bombs":10,"total":10}
+[2026-09-10 11:28:31.808] GET /board/fully_revealed
+[2026-09-10 11:28:31.808] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:32.447] POST /cell/reveal?x=1&y=1
+[2026-09-10 11:28:32.447] -> 200 {"cells":[{"bomb":false,"count":1,"x":1,"y":1}],"status":"ok"}
+[2026-09-10 11:28:32.450] GET /board/fully_revealed
+[2026-09-10 11:28:32.450] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:33.735] POST /cell/reveal?x=1&y=2
+[2026-09-10 11:28:33.735] -> 200 {"cells":[{"bomb":false,"count":1,"x":1,"y":2}],"status":"ok"}
+[2026-09-10 11:28:33.738] GET /board/fully_revealed
+[2026-09-10 11:28:33.738] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:34.580] POST /cell/reveal?x=1&y=3
+[2026-09-10 11:28:34.580] -> 200 {"cells":[{"bomb":false,"count":0,"x":1,"y":3},{"bomb":false,"count":1,"x":2,"y":2},{"bomb":false,"count":0,"x":2,"y":3},{"bomb":false,"count":0,"x":1,"y":4},{"bomb":false,"count":0,"x":2,"y":4},{"bomb":false,"count":2,"x":3,"y":2},{"bomb":false,"count":0,"x":3,"y":3},{"bomb":false,"count":0,"x":3,"y":4},{"bomb":false,"count":1,"x":1,"y":5},{"bomb":false,"count":1,"x":2,"y":5},{"bomb":false,"count":1,"x":3,"y":5},{"bomb":false,"count":1,"x":4,"y":2},{"bomb":false,"count":0,"x":4,"y":3},{"bomb":false,"count":1,"x":4,"y":4},{"bomb":false,"count":1,"x":4,"y":5},{"bomb":false,"count":1,"x":5,"y":2},{"bomb":false,"count":0,"x":5,"y":3},{"bomb":false,"count":1,"x":5,"y":4},{"bomb":false,"count":1,"x":6,"y":2},{"bomb":false,"count":2,"x":6,"y":3},{"bomb":false,"count":2,"x":6,"y":4}],"status":"ok"}
+[2026-09-10 11:28:34.583] GET /board/fully_revealed
+[2026-09-10 11:28:34.583] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:36.106] POST /cell/flag?x=2&y=1
+[2026-09-10 11:28:36.106] -> 200 {"flagged":true,"status":"ok","x":2,"y":1}
+[2026-09-10 11:28:36.109] GET /board/bombs
+[2026-09-10 11:28:36.109] -> 200 {"bombs":9,"total":10}
+[2026-09-10 11:28:36.111] GET /board/fully_revealed
+[2026-09-10 11:28:36.111] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:37.514] POST /cell/flag?x=3&y=1
+[2026-09-10 11:28:37.514] -> 200 {"flagged":true,"status":"ok","x":3,"y":1}
+[2026-09-10 11:28:37.516] GET /board/bombs
+[2026-09-10 11:28:37.516] -> 200 {"bombs":8,"total":10}
+[2026-09-10 11:28:37.518] GET /board/fully_revealed
+[2026-09-10 11:28:37.518] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:40.653] POST /cell/check?x=3&y=2
+[2026-09-10 11:28:40.653] -> 200 {"cells":[{"bomb":true,"count":-1,"x":4,"y":1}],"status":"boom"}
+[2026-09-10 11:28:51.675] POST /session/new?board_id=11
+[2026-09-10 11:28:51.675] -> 200 {"token":"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRfaWQiOiIyIiwiZXhwIjoxNzg5MTE1MzMxLCJpYXQiOjE3ODkwMjg5MzEsImlzcyI6Im1pbmVzd2VlcGVyIiwianRpIjoibWluZXN3ZWVwZXJfc2VydmVyIn0.GaxJl7ajFSQIzZOZqdamXq7LSQdpgSuGg1pUFmHzH-EV8k1Uv1U5D0vRw4KSO6ZyK_dkXvxqmORIqkY_OiAvocSw7KWR1Q7rv07EPtY78PlsJqDEWCJ1TIF3bd7Kf8V4ke8yT8zMBDp68ZrwTugDSwdIJUdz_onKTf53J2GfJQG7Q70tvmcdzqgheRCSmNdYS2gJfsCioRDBYG27XbfKODUObDgehkQ2rgNOObIMYC6UYskDr61iPZ2a0hCrHPhvB8ZNxQZvg9JzPciN1g-W68Fm7eFu8-vqhPXKn4cbQJYydjIc81Txtq377LbdGL8v73JUstBacmO7q94gecMcDg"}
+[2026-09-10 11:28:51.677] GET /board/size
+[2026-09-10 11:28:51.677] -> 200 {"height":10,"width":10}
+[2026-09-10 11:28:51.679] GET /board/bombs
+[2026-09-10 11:28:51.679] -> 200 {"bombs":10,"total":10}
+[2026-09-10 11:28:51.682] GET /board/bombs
+[2026-09-10 11:28:51.682] -> 200 {"bombs":10,"total":10}
+[2026-09-10 11:28:53.379] POST /cell/reveal?x=1&y=1
+[2026-09-10 11:28:53.379] -> 200 {"cells":[{"bomb":false,"count":1,"x":1,"y":1}],"status":"ok"}
+[2026-09-10 11:28:53.381] GET /board/fully_revealed
+[2026-09-10 11:28:53.381] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:56.398] POST /cell/reveal?x=1&y=2
+[2026-09-10 11:28:56.398] -> 200 {"cells":[{"bomb":false,"count":1,"x":1,"y":2}],"status":"ok"}
+[2026-09-10 11:28:56.400] GET /board/fully_revealed
+[2026-09-10 11:28:56.400] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:57.193] POST /cell/reveal?x=2&y=2
+[2026-09-10 11:28:57.194] -> 200 {"cells":[{"bomb":false,"count":1,"x":2,"y":2}],"status":"ok"}
+[2026-09-10 11:28:57.196] GET /board/fully_revealed
+[2026-09-10 11:28:57.196] -> 200 {"fully_revealed":false}
+[2026-09-10 11:28:59.058] POST /cell/flag?x=2&y=1
+[2026-09-10 11:28:59.058] -> 200 {"flagged":true,"status":"ok","x":2,"y":1}
+[2026-09-10 11:28:59.060] GET /board/bombs
+[2026-09-10 11:28:59.060] -> 200 {"bombs":9,"total":10}
+[2026-09-10 11:28:59.062] GET /board/fully_revealed
+[2026-09-10 11:28:59.062] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:00.796] POST /cell/check?x=2&y=2
+[2026-09-10 11:29:00.796] -> 200 {"cells":[{"bomb":false,"count":2,"x":3,"y":1},{"bomb":false,"count":2,"x":3,"y":2},{"bomb":false,"count":0,"x":1,"y":3},{"bomb":false,"count":0,"x":2,"y":3},{"bomb":false,"count":0,"x":1,"y":4},{"bomb":false,"count":0,"x":2,"y":4},{"bomb":false,"count":0,"x":3,"y":3},{"bomb":false,"count":0,"x":3,"y":4},{"bomb":false,"count":1,"x":1,"y":5},{"bomb":false,"count":1,"x":2,"y":5},{"bomb":false,"count":1,"x":3,"y":5},{"bomb":false,"count":1,"x":4,"y":2},{"bomb":false,"count":0,"x":4,"y":3},{"bomb":false,"count":1,"x":4,"y":4},{"bomb":false,"count":1,"x":4,"y":5},{"bomb":false,"count":1,"x":5,"y":2},{"bomb":false,"count":0,"x":5,"y":3},{"bomb":false,"count":1,"x":5,"y":4},{"bomb":false,"count":1,"x":6,"y":2},{"bomb":false,"count":2,"x":6,"y":3},{"bomb":false,"count":2,"x":6,"y":4}],"status":"ok"}
+[2026-09-10 11:29:00.799] GET /board/fully_revealed
+[2026-09-10 11:29:00.799] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:04.595] POST /cell/check?x=3&y=2
+[2026-09-10 11:29:04.595] -> 400 {"error":"Number of flags around cell does not match number of bombs"}
+[2026-09-10 11:29:08.435] POST /cell/flag?x=4&y=1
+[2026-09-10 11:29:08.435] -> 200 {"flagged":true,"status":"ok","x":4,"y":1}
+[2026-09-10 11:29:08.439] GET /board/bombs
+[2026-09-10 11:29:08.439] -> 200 {"bombs":8,"total":10}
+[2026-09-10 11:29:08.441] GET /board/fully_revealed
+[2026-09-10 11:29:08.441] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:09.436] POST /cell/check?x=4&y=2
+[2026-09-10 11:29:09.437] -> 200 {"cells":[{"bomb":false,"count":1,"x":5,"y":1}],"status":"ok"}
+[2026-09-10 11:29:09.440] GET /board/fully_revealed
+[2026-09-10 11:29:09.440] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:10.815] POST /cell/check?x=5&y=1
+[2026-09-10 11:29:10.815] -> 200 {"cells":[{"bomb":false,"count":1,"x":6,"y":1}],"status":"ok"}
+[2026-09-10 11:29:10.817] GET /board/fully_revealed
+[2026-09-10 11:29:10.817] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:13.412] POST /cell/flag?x=5&y=5
+[2026-09-10 11:29:13.412] -> 200 {"flagged":true,"status":"ok","x":5,"y":5}
+[2026-09-10 11:29:13.414] GET /board/bombs
+[2026-09-10 11:29:13.414] -> 200 {"bombs":7,"total":10}
+[2026-09-10 11:29:13.417] GET /board/fully_revealed
+[2026-09-10 11:29:13.417] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:14.294] POST /cell/check?x=5&y=4
+[2026-09-10 11:29:14.294] -> 200 {"cells":[{"bomb":false,"count":2,"x":6,"y":5}],"status":"ok"}
+[2026-09-10 11:29:14.296] GET /board/fully_revealed
+[2026-09-10 11:29:14.296] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:15.744] POST /cell/check?x=4&y=5
+[2026-09-10 11:29:15.744] -> 200 {"cells":[{"bomb":false,"count":1,"x":3,"y":6},{"bomb":false,"count":1,"x":4,"y":6},{"bomb":false,"count":1,"x":5,"y":6}],"status":"ok"}
+[2026-09-10 11:29:15.746] GET /board/fully_revealed
+[2026-09-10 11:29:15.746] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:16.388] POST /cell/check?x=4&y=6
+[2026-09-10 11:29:16.389] -> 200 {"cells":[{"bomb":false,"count":1,"x":3,"y":7},{"bomb":false,"count":0,"x":4,"y":7},{"bomb":false,"count":0,"x":5,"y":7},{"bomb":false,"count":0,"x":3,"y":8},{"bomb":false,"count":1,"x":4,"y":8},{"bomb":false,"count":1,"x":5,"y":8},{"bomb":false,"count":1,"x":6,"y":6},{"bomb":false,"count":0,"x":6,"y":7},{"bomb":false,"count":1,"x":6,"y":8},{"bomb":false,"count":1,"x":2,"y":7},{"bomb":false,"count":0,"x":2,"y":8},{"bomb":false,"count":1,"x":2,"y":9},{"bomb":false,"count":0,"x":3,"y":9},{"bomb":false,"count":1,"x":4,"y":9},{"bomb":false,"count":0,"x":7,"y":6},{"bomb":false,"count":0,"x":7,"y":7},{"bomb":false,"count":0,"x":7,"y":8},{"bomb":false,"count":1,"x":1,"y":7},{"bomb":false,"count":0,"x":1,"y":8},{"bomb":false,"count":1,"x":1,"y":9},{"bomb":false,"count":1,"x":2,"y":10},{"bomb":false,"count":0,"x":3,"y":10},{"bomb":false,"count":1,"x":4,"y":10},{"bomb":false,"count":1,"x":7,"y":5},{"bomb":false,"count":2,"x":8,"y":5},{"bomb":false,"count":1,"x":8,"y":6},{"bomb":false,"count":1,"x":8,"y":7},{"bomb":false,"count":0,"x":8,"y":8},{"bomb":false,"count":1,"x":6,"y":9},{"bomb":false,"count":0,"x":7,"y":9},{"bomb":false,"count":0,"x":8,"y":9},{"bomb":false,"count":1,"x":9,"y":7},{"bomb":false,"count":1,"x":9,"y":8},{"bomb":false,"count":1,"x":9,"y":9},{"bomb":false,"count":1,"x":6,"y":10},{"bomb":false,"count":0,"x":7,"y":10},{"bomb":false,"count":0,"x":8,"y":10},{"bomb":false,"count":1,"x":9,"y":10}],"status":"ok"}
+[2026-09-10 11:29:16.391] GET /board/fully_revealed
+[2026-09-10 11:29:16.391] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:17.536] POST /cell/flag?x=2&y=6
+[2026-09-10 11:29:17.536] -> 200 {"flagged":true,"status":"ok","x":2,"y":6}
+[2026-09-10 11:29:17.538] GET /board/bombs
+[2026-09-10 11:29:17.538] -> 200 {"bombs":6,"total":10}
+[2026-09-10 11:29:17.540] GET /board/fully_revealed
+[2026-09-10 11:29:17.540] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:18.667] POST /cell/check?x=1&y=5
+[2026-09-10 11:29:18.667] -> 200 {"cells":[{"bomb":false,"count":1,"x":1,"y":6}],"status":"ok"}
+[2026-09-10 11:29:18.670] GET /board/fully_revealed
+[2026-09-10 11:29:18.670] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:19.815] POST /cell/flag?x=1&y=10
+[2026-09-10 11:29:19.815] -> 200 {"flagged":true,"status":"ok","x":1,"y":10}
+[2026-09-10 11:29:19.818] GET /board/bombs
+[2026-09-10 11:29:19.818] -> 200 {"bombs":5,"total":10}
+[2026-09-10 11:29:19.819] GET /board/fully_revealed
+[2026-09-10 11:29:19.819] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:21.112] POST /cell/flag?x=5&y=9
+[2026-09-10 11:29:21.112] -> 200 {"flagged":true,"status":"ok","x":5,"y":9}
+[2026-09-10 11:29:21.115] GET /board/bombs
+[2026-09-10 11:29:21.115] -> 200 {"bombs":4,"total":10}
+[2026-09-10 11:29:21.116] GET /board/fully_revealed
+[2026-09-10 11:29:21.116] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:21.847] POST /cell/reveal?x=5&y=10
+[2026-09-10 11:29:21.847] -> 200 {"cells":[{"bomb":false,"count":1,"x":5,"y":10}],"status":"ok"}
+[2026-09-10 11:29:21.849] GET /board/fully_revealed
+[2026-09-10 11:29:21.849] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:26.222] POST /cell/flag?x=7&y=4
+[2026-09-10 11:29:26.222] -> 200 {"flagged":true,"status":"ok","x":7,"y":4}
+[2026-09-10 11:29:26.224] GET /board/bombs
+[2026-09-10 11:29:26.224] -> 200 {"bombs":3,"total":10}
+[2026-09-10 11:29:26.226] GET /board/fully_revealed
+[2026-09-10 11:29:26.226] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:28.343] POST /cell/check?x=6&y=4
+[2026-09-10 11:29:28.343] -> 200 {"cells":[{"bomb":false,"count":2,"x":7,"y":3}],"status":"ok"}
+[2026-09-10 11:29:28.345] GET /board/fully_revealed
+[2026-09-10 11:29:28.345] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:30.158] POST /cell/check?x=6&y=3
+[2026-09-10 11:29:30.158] -> 400 {"error":"Number of flags around cell does not match number of bombs"}
+[2026-09-10 11:29:31.187] POST /cell/flag?x=7&y=2
+[2026-09-10 11:29:31.187] -> 200 {"flagged":true,"status":"ok","x":7,"y":2}
+[2026-09-10 11:29:31.189] GET /board/bombs
+[2026-09-10 11:29:31.189] -> 200 {"bombs":2,"total":10}
+[2026-09-10 11:29:31.191] GET /board/fully_revealed
+[2026-09-10 11:29:31.191] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:32.462] POST /cell/check?x=6&y=1
+[2026-09-10 11:29:32.462] -> 200 {"cells":[{"bomb":false,"count":1,"x":7,"y":1}],"status":"ok"}
+[2026-09-10 11:29:32.464] GET /board/fully_revealed
+[2026-09-10 11:29:32.464] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:33.201] POST /cell/check?x=7&y=1
+[2026-09-10 11:29:33.201] -> 200 {"cells":[{"bomb":false,"count":1,"x":8,"y":1},{"bomb":false,"count":1,"x":8,"y":2}],"status":"ok"}
+[2026-09-10 11:29:33.203] GET /board/fully_revealed
+[2026-09-10 11:29:33.203] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:34.081] POST /cell/check?x=8&y=2
+[2026-09-10 11:29:34.081] -> 200 {"cells":[{"bomb":false,"count":0,"x":9,"y":1},{"bomb":false,"count":0,"x":10,"y":1},{"bomb":false,"count":0,"x":9,"y":2},{"bomb":false,"count":0,"x":10,"y":2},{"bomb":false,"count":2,"x":8,"y":3},{"bomb":false,"count":0,"x":9,"y":3},{"bomb":false,"count":0,"x":10,"y":3},{"bomb":false,"count":1,"x":8,"y":4},{"bomb":false,"count":0,"x":9,"y":4},{"bomb":false,"count":0,"x":10,"y":4},{"bomb":false,"count":1,"x":9,"y":5},{"bomb":false,"count":1,"x":10,"y":5}],"status":"ok"}
+[2026-09-10 11:29:34.084] GET /board/fully_revealed
+[2026-09-10 11:29:34.084] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:36.407] POST /cell/check?x=8&y=5
+[2026-09-10 11:29:36.407] -> 400 {"error":"Number of flags around cell does not match number of bombs"}
+[2026-09-10 11:29:37.420] POST /cell/flag?x=9&y=6
+[2026-09-10 11:29:37.420] -> 200 {"flagged":true,"status":"ok","x":9,"y":6}
+[2026-09-10 11:29:37.422] GET /board/bombs
+[2026-09-10 11:29:37.422] -> 200 {"bombs":1,"total":10}
+[2026-09-10 11:29:37.424] GET /board/fully_revealed
+[2026-09-10 11:29:37.424] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:38.292] POST /cell/check?x=9&y=5
+[2026-09-10 11:29:38.292] -> 200 {"cells":[{"bomb":false,"count":1,"x":10,"y":6}],"status":"ok"}
+[2026-09-10 11:29:38.295] GET /board/fully_revealed
+[2026-09-10 11:29:38.295] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:39.182] POST /cell/check?x=10&y=6
+[2026-09-10 11:29:39.182] -> 200 {"cells":[{"bomb":false,"count":1,"x":10,"y":7}],"status":"ok"}
+[2026-09-10 11:29:39.184] GET /board/fully_revealed
+[2026-09-10 11:29:39.184] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:40.361] POST /cell/check?x=10&y=7
+[2026-09-10 11:29:40.362] -> 200 {"cells":[{"bomb":false,"count":1,"x":10,"y":8}],"status":"ok"}
+[2026-09-10 11:29:40.365] GET /board/fully_revealed
+[2026-09-10 11:29:40.365] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:42.798] POST /cell/reveal?x=10&y=10
+[2026-09-10 11:29:42.798] -> 200 {"cells":[{"bomb":false,"count":1,"x":10,"y":10}],"status":"ok"}
+[2026-09-10 11:29:42.800] GET /board/fully_revealed
+[2026-09-10 11:29:42.800] -> 200 {"fully_revealed":false}
+[2026-09-10 11:29:43.812] POST /cell/flag?x=10&y=9
+[2026-09-10 11:29:43.812] -> 200 {"flagged":true,"status":"ok","x":10,"y":9}
+[2026-09-10 11:29:43.815] GET /board/bombs
+[2026-09-10 11:29:43.815] -> 200 {"bombs":0,"total":10}
+[2026-09-10 11:29:43.817] GET /board/fully_revealed
+[2026-09-10 11:29:43.817] -> 200 {"fully_revealed":true}
+[2026-09-10 11:29:43.819] POST /board/check
+[2026-09-10 11:29:43.819] -> 200 {"status":"win"}

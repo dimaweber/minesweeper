@@ -273,3 +273,28 @@ target_link_libraries(${TARGET_GENERATOR} PRIVATE fmt::fmt spdlog::spdlog yaml-c
 if (SERVER_SUPPORT_PLUGINS)
     add_subdirectory(src/server/plugins)
 endif ()
+
+# Live replay test: spawns a real ms_server (with plugins, since the fixture
+# log exercises cell/check, which is plugin-hosted) against the fixed,
+# reproducible board #11, and replays a captured requests.log against it -
+# ms_test's gtest_discover_tests above is all pure in-process logic
+# (parameter_bytestream_t), nothing there ever starts a server or makes an
+# HTTP call, so this is a separate CTest target rather than folded into that
+# one. Requires cmake --build to have already produced ms_server and the
+# plugins, same as ms_test requires a prior build - ctest itself doesn't
+# build anything.
+if (BUILD_TESTS AND SERVER_SUPPORT_PLUGINS)
+    find_package(Python3 COMPONENTS Interpreter)
+    if (Python3_FOUND)
+        add_test(NAME live_replay
+                COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/src/server/tests/live/replay_requests_log.py
+                --log ${CMAKE_SOURCE_DIR}/src/server/tests/live/fixtures/board11_two_sessions.requests.log
+                --server-bin $<TARGET_FILE:${TARGET_SERVER}>
+                --plugins-dir ${CMAKE_BINARY_DIR}/plugins
+                --port 18099)
+        set_tests_properties(live_replay PROPERTIES TIMEOUT 60)
+    else ()
+        message(WARNING "Python3 interpreter not found - skipping live_replay test")
+    endif ()
+endif ()

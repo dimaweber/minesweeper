@@ -8,6 +8,7 @@ build/
 # runtime
 restbed.log
 plugins.log
+requests.log
 minesweeper.crt
 minesweeper_dh.pem
 minesweeper_rsa.pem

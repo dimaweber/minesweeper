@@ -20,6 +20,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <string>
 #include <wbr/string_manipulations.hxx>
 
@@ -28,6 +29,38 @@
 #include "types.hxx"
 
 namespace {
+// A dedicated request/response audit trail, separate from the app's
+// general log and from restbed's own protocol-level "restbed" logger -
+// one line per request, one per response, file-only (no console sink;
+// this is meant to be read back later, not watched live). Lazily
+// initialized on first use rather than from main() like the other named
+// loggers, since dispatch()/response_t::send() (both in this file) are
+// the only things that ever need it.
+std::shared_ptr<spdlog::logger> requests_logger ( ) {
+  static const std::shared_ptr<spdlog::logger> logger = [] {
+    auto file = std::make_shared<spdlog::sinks::basic_file_sink_mt>("requests.log", true);
+    file->set_pattern("[%Y-%m-%d %H:%M:%S.%e] %v");
+    auto l = std::make_shared<spdlog::logger>("requests", file);
+    l->set_level(spdlog::level::info);
+    l->flush_on(spdlog::level::info);
+    return l;
+  }( );
+  return logger;
+}
+
+// "key1=val1&key2=val2", in whatever order restbed's multimap iterates
+// them - not necessarily the order they appeared in the URL, but stable
+// and complete, which is what a log needs.
+std::string format_query_string (const restbed::Request& request) {
+  std::string query;
+  for ( const auto& [key, value]: request.get_query_parameters( ) ) {
+    if ( !query.empty( ) ) {
+      query += '&';
+    }
+    query += key + '=' + value;
+  }
+  return query;
+}
 // Parses resource.params from the request's query string: a missing
 // required parameter, or one that fails to parse as its declared type,
 // aborts with a message meant for send_error() rather than continuing with
@@ -219,6 +252,7 @@ private:
 
 struct board_t : public board_i {
   board_t(std::size_t width, std::size_t height, int bombs_count);
+  board_t(std::size_t width, std::size_t height, std::span<const coord_t> mines);
 
   std::shared_ptr<board_i> clone ( ) const override {
     auto new_board   = std::make_shared<board_t>(w_, h_, 0);
@@ -297,6 +331,12 @@ board_t::board_t (std::size_t width, std::size_t height, int bombs_count) : data
       row = rand( ) % height;
     } while ( data_[row * width + col].is_boom( ) );
     data_[row * width + col].set_boom( );
+  }
+}
+
+board_t::board_t (std::size_t width, std::size_t height, std::span<const coord_t> mines) : data_(width * height), w_ {width}, h_ {height} {
+  for ( const coord_t& c: mines ) {
+    data_[coord_to_index(c)].set_boom( );
   }
 }
 
@@ -498,12 +538,24 @@ std::optional<board_i&> plugin_api_t::board_for_client (client_id_t client_id) {
   return std::nullopt;
 }
 
-std::unique_ptr<board_i> plugin_api_t::create_board (std::size_t width, std::size_t height, [[maybe_unused]] int bombs_count) {
-  auto b = std::make_unique<board_t>(width, height, bombs_count);
-  for ( const coord_t& c: b->all_coords( ) ) {
-    const int cnt = std::ranges::count_if(b->neighbors(c), [&b] (const auto& p) { return b->cell(p).is_boom( ); });
-    b->cell(c).set_neighbor_bombs_count(cnt);
+namespace {
+void compute_neighbor_counts (board_t& b) {
+  for ( const coord_t& c: b.all_coords( ) ) {
+    const int cnt = std::ranges::count_if(b.neighbors(c), [&b] (const auto& p) { return b.cell(p).is_boom( ); });
+    b.cell(c).set_neighbor_bombs_count(cnt);
   }
+}
+}  // namespace
+
+std::unique_ptr<board_i> plugin_api_t::create_board (std::size_t width, std::size_t height, int bombs_count) {
+  auto b = std::make_unique<board_t>(width, height, bombs_count);
+  compute_neighbor_counts(*b);
+  return b;
+}
+
+std::unique_ptr<board_i> plugin_api_t::create_fixed_board (std::size_t width, std::size_t height, std::vector<coord_t> mines) {
+  auto b = std::make_unique<board_t>(width, height, mines);
+  compute_neighbor_counts(*b);
   return b;
 }
 
@@ -632,6 +684,18 @@ std::pair<std::string, headers_t> response_t::operator( ) (content_type_t conten
 
 void response_t::send (int http_code, content_type_t content_type) {
   const auto [body, headers] = this->body(content_type);
+
+  // The single funnel every response goes through - response_t is only
+  // ever constructed once, in dispatch() - so logging request+response
+  // here covers every request this server ever handles (built-in or
+  // plugin-hosted, success or error) without threading a log call through
+  // dispatch()'s several early-return paths.
+  if ( const auto request = session_.get_request( ) ) {
+    const std::string query = format_query_string(*request);
+    requests_logger( )->info("{} {}{}{}", request->get_method( ), request->get_path( ), query.empty( ) ? "" : "?", query);
+    requests_logger( )->info("-> {} {}", http_code, body);
+  }
+
   session_.close(http_code, body, headers);
 }
 
