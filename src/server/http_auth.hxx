@@ -1,5 +1,7 @@
 #pragma once
 
+#include <corvusoft/restbed/session.hpp>
+
 #include "plugins/api.hxx"
 
 namespace http::auth {

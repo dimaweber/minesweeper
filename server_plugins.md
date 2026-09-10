@@ -175,14 +175,20 @@ authentication step at all. There is no separately-settable "requires auth" bool
 wrong: the handler's own type is the declaration of what it needs, checked at compile
 time by which overload it's passed to.
 
+These two overloads are the ergonomic ones to call - they're not what actually crosses
+the ABI boundary, though: `path`/`method`/`params` get `store()`d into bytes (the same
+treatment a handler's own params/result already get, see `handler_wire`/`resource_wire`
+in `api.hxx`) before reaching the byte-only overloads `plugin_api_i` actually declares as
+pure virtual. The call-site shape above is unaffected either way.
+
 `params` declares the query parameters the host should parse before calling the handler:
 
 ```cpp
 struct param_spec_t {
-  std::string_view name;
-  param_type_t      type          = param_type_t::string;  // string | integer | boolean
-  bool              required      = false;
-  parameter_t       default_value = std::string { };       // used when absent and not required
+  std::string name;
+  param_type_t type          = param_type_t::string;  // string | integer | boolean
+  bool         required      = false;
+  parameter_t  default_value = std::string { };        // used when absent and not required
 };
 ```
 
@@ -372,27 +378,28 @@ int  operator[](size_t index) const noexcept;         // 0=x, 1=y
 std::string dim_name(int i) const noexcept;            // "x"/"y" — for building responses generically
 ```
 
-**RSA/SSL paths** (rarely needed by plugins; used internally for JWT signing/HTTPS) live
-on `http_api_i`, not directly on `plugin_api_i` — reach them through `http_api()`:
-```cpp
-http_api_i* http_api( ); // on plugin_api_i
+**RSA/SSL paths and JWT/HTTPS setup are not on `plugin_api_i`.** They used to be reachable
+(rarely, and only in principle) via `http_api()`/`http_api_i`; both are gone now. No
+plugin ever legitimately needed RSA private-key material, SSL paths, or
+`authorize_client(restbed::Session&)` — they're host-internal, used only by `server.cxx`'s
+own startup/CLI wiring and by `http_auth.cxx`'s JWT sign/verify - so this stopped being
+part of the ABI plugins build against entirely, rather than merely being documented as
+"rarely needed." If a plugin genuinely needs something here, that's a sign it belongs on
+`plugin_api_i` as new, deliberately-plugin-facing surface (with its own
+`ADDON_API_ABI_VERSION` bump), not a reason to re-expose this.
 
-// on http_api_i:
-std::filesystem::path rsa_priv_key_path( ) const;
-std::filesystem::path rsa_pub_key_path( ) const;
-std::filesystem::path ssl_cert_path( ) const;
-std::filesystem::path ssl_dh_path( ) const;
-const std::string&    rsa_private_key( ) const;
-const std::string&    rsa_public_key( ) const;
-```
-`http_api_i` also has the `set_*` counterparts of the four paths above (the host applies
-CLI-configured paths through them at startup) and `authorize_client(restbed::Session&)` —
-used internally by the host's dispatch to implement `board_handler_t`'s auth step, not
-something a plugin handler calls itself (see "The two handler shapes" above).
+It's stronger than just "off the vtable," too: the RSA/SSL state (`http_api_t`) isn't a
+member of `plugin_api_t` at all anymore - it's a fully separate object
+(`host_http_api` in `api_impl.hxx`), never reachable through anything a plugin was ever
+handed a pointer or reference to. A `plugin_api_i&`'s *private* members are still just
+bytes sitting in memory a plugin holds a valid reference to - "private" is a compile-time
+rule a `reinterpret_cast`/offset trick doesn't have to respect. Keeping key material in a
+genuinely separate object means finding it from a plugin would mean scanning this
+process's own memory blind, not following any pointer the plugin actually has.
 
 ## Why references and function pointers, not `shared_ptr`/`std::function`
 
-Every type on the `plugin_api_i`/`http_api_i`/`board_i` boundary is a plain reference,
+Every type on the `plugin_api_i`/`board_i` boundary is a plain reference,
 raw pointer, or C-style function pointer (`simple_handler_t`, `board_handler_t`,
 `board_manipulation_func_t`) — deliberately, not `std::shared_ptr` or `std::function`.
 This isn't style preference;
@@ -449,8 +456,8 @@ unit. The server computes the same tag for itself and compares before calling
 naming both tags and skips the plugin entirely, the same way it already does for a
 plugin missing `init_plugin()`.
 
-**Bump `ADDON_API_ABI_VERSION`** (in `api.hxx`) whenever `plugin_api_i`/`http_api_i`/
-`board_i`/`cell_i` change shape in a way that would make an already-built plugin call
+**Bump `ADDON_API_ABI_VERSION`** (in `api.hxx`) whenever `plugin_api_i`/`board_i`/
+`cell_i` change shape in a way that would make an already-built plugin call
 the wrong vtable slot — reordering, removing, or changing the signature of an existing
 virtual method. Appending a new virtual method at the end doesn't need a bump on its
 own merits, but doing so still means every not-yet-rebuilt plugin is now built against
@@ -487,8 +494,8 @@ Both are fully documented from the client's perspective in `server_api.md`.
 
 * Only include `"api.hxx"` (i.e. `src/server/plugins/api.hxx`) — never reach into
   `handlers.hxx`, `http_auth.hxx`, or `api_impl.hxx`. If something a plugin needs isn't
-  exposed on `plugin_api_i`/`http_api_i`/`board_i`/`cell_i`, that's a gap in those
-  interfaces to fix, not a reason to link against server internals.
+  exposed on `plugin_api_i`/`board_i`/`cell_i`, that's a gap in those interfaces to fix,
+  not a reason to link against server internals.
 * Register with the handler shape matching what you actually need — `board_handler_t`
   if you need the caller's authenticated board, `simple_handler_t` otherwise — rather
   than declaring one and then manually resolving (or skipping) auth inside the handler

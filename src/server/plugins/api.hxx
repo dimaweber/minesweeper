@@ -2,12 +2,11 @@
 
 #include <fmt/format.h>
 
-#include <corvusoft/restbed/service.hpp>
-#include <corvusoft/restbed/session.hpp>
 #include <corvusoft/restbed/status_code.hpp>
 #include <expected>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -20,15 +19,15 @@
   #include <sigslot/signal.hpp>
 #endif
 
-/// Bump this whenever addon_api_i/http_api_i/board_i/cell_i change shape in any way
+/// Bump this whenever addon_api_i/plugin_api_i/board_i/cell_i change shape in any way
 /// that would make an already-built plugin call the wrong vtable slot (reordering,
 /// removing, or changing the signature of an existing virtual method) - new methods
 /// appended at the end don't need a bump. See addon_api_abi_tag() below: it folds
 /// this in alongside compiler/stdlib identity so a mismatched plugin is refused at
 /// load time instead of corrupting memory once called.
-#define ADDON_API_ABI_VERSION 1
+#define ADDON_API_ABI_VERSION 2
 
-/// Everything crossing the addon_api_i/http_api_i/board_i boundary - including this
+/// Everything crossing the addon_api_i/plugin_api_i/board_i boundary - including this
 /// header itself, since sigslot::signal<> is header-only and its layout is whatever
 /// each translation unit's compiler/flags produce - only has a well-defined, agreed
 /// layout when the plugin and the server are built with the same compiler, same
@@ -263,9 +262,7 @@ using board_id_t = uint64_t;
 
 using client_id_t = uint64_t;
 
-using SessionPtr  = std::shared_ptr<restbed::Session>;
-using ResourcePtr = std::shared_ptr<restbed::Resource>;
-using headers_t   = std::multimap<std::string, std::string>;
+using headers_t = std::multimap<std::string, std::string>;
 
 /// A parameter is either a scalar value, an array of parameters of the same
 /// (recursive) type (arrays of arrays are allowed), or a map of named
@@ -916,44 +913,21 @@ protected:
   virtual rest_api_response_i& add_raw_header(const std::string& key, const std::string& value) = 0;
 };
 
-struct http_api_i {
-  virtual ~http_api_i( ) = default;
-
-  [[nodiscard]] virtual std::filesystem::path rsa_priv_key_path( ) const = 0;
-  [[nodiscard]] virtual std::filesystem::path rsa_pub_key_path( ) const  = 0;
-  [[nodiscard]] virtual std::filesystem::path ssl_cert_path( ) const     = 0;
-  [[nodiscard]] virtual std::filesystem::path ssl_dh_path( ) const       = 0;
-
-  virtual void set_rsa_priv_key_path(std::filesystem::path path) = 0;
-  virtual void set_rsa_pub_key_path(std::filesystem::path path)  = 0;
-  virtual void set_ssl_cert_path(std::filesystem::path path)     = 0;
-  virtual void set_ssl_dh_path(std::filesystem::path path)       = 0;
-
-  [[nodiscard]] virtual const std::string& rsa_private_key( ) const = 0;
-  [[nodiscard]] virtual const std::string& rsa_public_key( ) const  = 0;
-
-  virtual result_t<client_id_t> authorize_client(restbed::Session& session) const = 0;
-
-  /// Reads (or generates, if missing) the key pair from whatever
-  /// rsa_priv_key_path()/rsa_pub_key_path() currently are, populating
-  /// rsa_private_key()/rsa_public_key(). Deliberately not done implicitly by
-  /// the constructor or by set_rsa_priv_key_path()/set_rsa_pub_key_path():
-  /// this type is constructed before argv is parsed (there is no path to
-  /// configure yet), so eagerly loading at construction time would always
-  /// read/generate at whatever the *default* path happens to be, no matter
-  /// what --rsa-priv-key/--data-dir the caller later passes - a caller must
-  /// finish setting both paths first, then call this once.
-  virtual void load_rsa_keys( ) = 0;
-};
-
 struct plugin_api_i {
   enum class param_type_t { string, integer, boolean };
 
   struct param_spec_t {
-    std::string_view name;
-    param_type_t     type          = param_type_t::string;
-    bool             required      = false;
-    parameter_t      default_value = std::string { };
+    /// `std::string`, not `std::string_view`: unlike the handler payload
+    /// itself, a resource's param specs now round-trip through owned,
+    /// decoded bytes (see resource_wire below) on their way into the host's
+    /// long-lived resource registry - a view would dangle once that
+    /// decoding's own temporaries are gone. This also drops what used to be
+    /// an unstated assumption that plugin authors only ever wrote `.name =
+    /// "some-literal"` (the one case a `string_view` here didn't dangle).
+    std::string  name;
+    param_type_t type          = param_type_t::string;
+    bool         required      = false;
+    parameter_t  default_value = std::string { };
   };
 
   /// A handler's result on success is the set of properties to send back to the
@@ -1014,8 +988,29 @@ struct plugin_api_i {
     log(level, fmt::format(fmt, std::forward<Args>(args)...));
   }
 
-  virtual void add_resource(std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params = { }) = 0;
-  virtual void add_resource(std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params = { })  = 0;
+  /// @{
+  /// The actual ABI-crossing entry points: `spec_buf`/`spec_len` is a
+  /// store()d resource_wire::spec_t - `path`, `method`, and the
+  /// `param_spec_t` list packed into one parameter_t - the same byte-only
+  /// treatment simple_handler_t/board_handler_t's own params/result
+  /// already get (see the @note on those two aliases above). Only
+  /// `handler` (a plain function pointer - safe regardless of which
+  /// side's compiler/stdlib built it) crosses this vtable call as
+  /// anything other than raw bytes. Plugin authors don't call these
+  /// directly - use the add_resource(path, method, handler, params) or
+  /// add_resource(const resource_t&) overloads below, which do the
+  /// store() at this boundary instead.
+  virtual void add_resource(const std::byte* spec_buf, size_t spec_len, simple_handler_t handler) = 0;
+  virtual void add_resource(const std::byte* spec_buf, size_t spec_len, board_handler_t handler)  = 0;
+  /// @}
+
+  /// @{
+  /// Ordinary registration - same call-site shape plugin authors have
+  /// always used; only the serialization onto the byte-only overloads
+  /// above is new. Defined out-of-line, after resource_wire, below.
+  void add_resource (std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params = { });
+  void add_resource (std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params = { });
+  /// @}
 
   void add_resource (const resource_t& resource) {
     std::visit([&] (auto handler) { add_resource(resource.path, resource.method, handler, resource.params); }, resource.handler);
@@ -1038,10 +1033,6 @@ struct plugin_api_i {
 
   virtual std::unique_ptr<board_i> create_board(std::size_t width, std::size_t height, int bombs_count) = 0;
 
-  virtual void install_entrypoints(restbed::Service& service) = 0;
-
-  virtual http_api_i* http_api( ) = 0;
-
 #if USE_PALSIGSLOT
   virtual sigslot::signal<>& ready_to_load_resources_signal( ) = 0;
   virtual void               on_ready_to_load_resources( )     = 0;
@@ -1063,6 +1054,96 @@ using param_type_t     = plugin_api_i::param_type_t;
 using param_spec_t     = plugin_api_i::param_spec_t;
 using handler_error_t  = plugin_api_i::handler_error_t;
 using handler_result_t = plugin_api_i::handler_result_t;
+
+/// Converts a resource registration's path/method/param-specs to/from the
+/// single parameter_t envelope that crosses plugin_api_i::add_resource's
+/// byte-only ABI boundary - the same byte-only treatment handler_wire
+/// (below) gives a handler's own params/result, so std::string_view/
+/// std::string/std::vector/std::variant never cross that call as C++
+/// objects either.
+namespace resource_wire {
+
+struct spec_t {
+  std::string               path;
+  http_methods_t            method;
+  std::vector<param_spec_t> params;
+};
+
+inline parameter_t to_wire (std::string_view path, http_methods_t method, const std::vector<param_spec_t>& params) {
+  parameter_list_t param_list;
+  param_list.reserve(params.size( ));
+  for ( const auto& p: params ) {
+    param_list.push_back(parameter_map_t {
+        {"name",          p.name                       },
+        {"type",          static_cast<int64_t>(p.type)},
+        {"required",      p.required                  },
+        {"default_value", p.default_value              },
+    });
+  }
+  return parameter_map_t {
+      {"path",   std::string(path)     },
+      {"method", static_cast<int64_t>(method)},
+      {"params", std::move(param_list) },
+  };
+}
+
+/// A malformed envelope (only possible from a version-skewed or otherwise
+/// broken caller - see handler_wire::from_wire's identical reasoning
+/// below) is reported as `std::nullopt`; plugin_api_t::add_resource is
+/// what actually logs about it, since that's host-internal and this
+/// header has no logger of its own to call.
+inline std::optional<spec_t> from_wire (const parameter_t& wire) {
+  try {
+    const auto& m = std::get<parameter_map_t>(wire);
+    spec_t      spec;
+    spec.path   = std::get<std::string>(m.at("path"));
+    spec.method = static_cast<http_methods_t>(std::get<int64_t>(m.at("method")));
+    for ( const auto& item: std::get<parameter_list_t>(m.at("params")) ) {
+      const auto& pm = std::get<parameter_map_t>(item);
+      spec.params.push_back(param_spec_t {
+          .name          = std::get<std::string>(pm.at("name")),
+          .type          = static_cast<param_type_t>(std::get<int64_t>(pm.at("type"))),
+          .required      = std::get<bool>(pm.at("required")),
+          .default_value = pm.at("default_value"),
+      });
+    }
+    return spec;
+  } catch ( const std::exception& ) {
+    return std::nullopt;
+  }
+}
+
+/// Growing-store idiom identical in spirit to api.cxx's own (internal)
+/// store_growing() - pure serialization, no side effects, so retrying
+/// with more room on failure is safe. Duplicated here rather than shared,
+/// since api.cxx isn't visible to plugin translation units and this
+/// header has to stay self-contained.
+inline constexpr size_t initial_wire_capacity = 4096;
+inline constexpr size_t max_wire_capacity     = 16u * 1024 * 1024;
+
+inline std::vector<std::byte> store_growing (const parameter_t& value) {
+  for ( size_t capacity = initial_wire_capacity; capacity <= max_wire_capacity; capacity *= 2 ) {
+    std::vector<std::byte> buffer(capacity);
+    parameter_bytestream_t bs(buffer);
+    if ( const auto stored = bs.store(value); stored ) {
+      buffer.resize(bs.size( ));
+      return buffer;
+    }
+  }
+  return { };  // empty => caller treats this as "failed to serialize"
+}
+
+}  // namespace resource_wire
+
+inline void plugin_api_i::add_resource (std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params) {
+  const auto bytes = resource_wire::store_growing(resource_wire::to_wire(path, method, params));
+  add_resource(bytes.data( ), bytes.size( ), handler);
+}
+
+inline void plugin_api_i::add_resource (std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params) {
+  const auto bytes = resource_wire::store_growing(resource_wire::to_wire(path, method, params));
+  add_resource(bytes.data( ), bytes.size( ), handler);
+}
 
 /// Converts a handler_result_t to/from the single parameter_t envelope that
 /// actually crosses add_resource's simple_handler_t/board_handler_t

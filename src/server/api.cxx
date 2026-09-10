@@ -25,6 +25,7 @@
 #include <wbr/string_manipulations.hxx>
 
 #include "api_impl.hxx"
+#include "http_auth.hxx"
 #include "rsa.hxx"
 #include "types.hxx"
 
@@ -129,6 +130,26 @@ result_t<std::vector<std::byte>> store_growing (const parameter_t& value) {
     }
   }
   return std::unexpected(fmt::format("Value too large to serialize (> {} bytes).", max_bytestream_capacity));
+}
+
+// The receiving side of resource_wire (api.hxx): decodes what
+// plugin_api_i::add_resource's convenience overloads store()d. A failure
+// here (malformed bytes, wrong wire_version, ...) can now only mean a
+// genuinely broken/version-skewed caller - it's logged and the resource is
+// silently dropped rather than registered, same as a handler's own
+// malformed-output case (unwrap_handler_output above).
+std::optional<resource_wire::spec_t> decode_resource_spec (const std::byte* spec_buf, size_t spec_len) {
+  parameter_bytestream_t bs(const_cast<std::byte*>(spec_buf), spec_len);
+  const auto             wire = bs.load( );
+  if ( !wire ) {
+    SPDLOG_ERROR("add_resource: malformed resource spec: {}", wire.error( ));
+    return std::nullopt;
+  }
+  auto spec = resource_wire::from_wire(*wire);
+  if ( !spec ) {
+    SPDLOG_ERROR("add_resource: malformed resource spec envelope");
+  }
+  return spec;
 }
 
 // Every board_handler_t/simple_handler_t call gets one buffer this large
@@ -736,12 +757,16 @@ void http_api_t::load_rsa_keys ( ) {
   std::tie(rsa_private_key_, rsa_public_key_) = rsa_key_pair(rsa_priv_key_path_, rsa_pub_key_path_);
 }
 
-void plugin_api_t::add_resource (std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params) {
-  resources_.push_back({std::string(path), method, handler, std::move(params)});
+void plugin_api_t::add_resource (const std::byte* spec_buf, size_t spec_len, simple_handler_t handler) {
+  if ( auto spec = decode_resource_spec(spec_buf, spec_len); spec ) {
+    resources_.push_back({std::move(spec->path), spec->method, handler, std::move(spec->params)});
+  }
 }
 
-void plugin_api_t::add_resource (std::string_view path, http_methods_t method, board_handler_t handler, std::vector<param_spec_t> params) {
-  resources_.push_back({std::string(path), method, handler, std::move(params)});
+void plugin_api_t::add_resource (const std::byte* spec_buf, size_t spec_len, board_handler_t handler) {
+  if ( auto spec = decode_resource_spec(spec_buf, spec_len); spec ) {
+    resources_.push_back({std::move(spec->path), spec->method, handler, std::move(spec->params)});
+  }
 }
 
 void plugin_api_t::dispatch (restbed::Session& session, const resource_t& resource) {
@@ -771,7 +796,7 @@ void plugin_api_t::dispatch (restbed::Session& session, const resource_t& resour
   const handler_result_t result = std::visit(
       [&] (auto handler) -> handler_result_t {
         if constexpr ( std::is_same_v<decltype(handler), board_handler_t> ) {
-          const auto id = http_api_.authorize_client(session);
+          const auto id = http::auth::authorize_client(session);
           if ( !id ) {
             return std::unexpected(handler_error_t {restbed::UNAUTHORIZED, id.error( )});
           }

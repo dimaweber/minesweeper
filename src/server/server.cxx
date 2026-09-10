@@ -24,7 +24,13 @@
 #include "inc/logger.hxx"
 #include "rsa.hxx"
 
-std::unique_ptr<plugin_api_i> api;
+// plugin_api_t (concrete), not plugin_api_i (the interface) - install_entrypoints()
+// is host-only, deliberately not part of the ABI plugins build against (see
+// api_impl.hxx). Every dlopen'd plugin still only ever sees a plugin_api_i&,
+// passed by reference wherever that's what's required below. RSA/SSL state
+// (host_http_api, also in api_impl.hxx) isn't reached through this variable
+// at all anymore - it's a fully separate object, referenced directly below.
+std::unique_ptr<plugin_api_t> api;
 
 class rb_log : public restbed::Logger {
   std::filesystem::path                log_dir_;
@@ -508,17 +514,17 @@ int main (int argc, const char* argv[]) {
   plugin::initialize_logger(log_dir);
   set_requests_log_dir(log_dir);
 
-  api->http_api( )->set_rsa_priv_key_path(rsa_priv_key_path);
-  api->http_api( )->set_rsa_pub_key_path(rsa_pub_key_path);
-  api->http_api( )->set_ssl_cert_path(ssl_cert_path);
-  api->http_api( )->set_ssl_dh_path(ssl_dh_path);
+  host_http_api.set_rsa_priv_key_path(rsa_priv_key_path);
+  host_http_api.set_rsa_pub_key_path(rsa_pub_key_path);
+  host_http_api.set_ssl_cert_path(ssl_cert_path);
+  host_http_api.set_ssl_dh_path(ssl_dh_path);
   // Must come after both rsa path setters above: load_rsa_keys() reads (or
   // generates) from whatever they currently are, and unlike the old
   // http_api_t constructor - which read from its own hardcoded default
   // path before argv was even parsed, so --rsa-priv-key/--data-dir could
   // never actually affect which key material got loaded - this is called
   // only once both are finalized.
-  api->http_api( )->load_rsa_keys( );
+  host_http_api.load_rsa_keys( );
 
   if constexpr ( plugin::server_support_plugins( ) ) {
     SPDLOG_DEBUG("plugin support is enabled, check for plugins available");
@@ -536,9 +542,9 @@ int main (int argc, const char* argv[]) {
   }
 
   if ( create_ssl_cert ) {
-    if ( !std::filesystem::exists(api->http_api( )->ssl_cert_path( )) || !std::filesystem::exists(api->http_api( )->ssl_dh_path( )) ) {
+    if ( !std::filesystem::exists(host_http_api.ssl_cert_path( )) || !std::filesystem::exists(host_http_api.ssl_dh_path( )) ) {
       SPDLOG_INFO("creating self-signed SSL certificate and Diffie-Hellman parameters");
-      if ( !create_self_signed_ssl_cert(api->http_api( )->ssl_cert_path( ), api->http_api( )->ssl_dh_path( ), api->http_api( )->rsa_priv_key_path( )) ) {
+      if ( !create_self_signed_ssl_cert(host_http_api.ssl_cert_path( ), host_http_api.ssl_dh_path( ), host_http_api.rsa_priv_key_path( )) ) {
         SPDLOG_ERROR("failed to create self-signed SSL certificate and Diffie-Hellman parameters");
         return EXIT_FAILURE;
       }
@@ -586,9 +592,9 @@ int main (int argc, const char* argv[]) {
   if ( !no_https ) {
     const auto ssl_settings = std::make_shared<restbed::SSLSettings>( );
     ssl_settings->set_http_disabled(no_http);
-    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", api->http_api( )->rsa_priv_key_path( ))});
-    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", api->http_api( )->ssl_cert_path( ))});
-    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", api->http_api( )->ssl_dh_path( ))});
+    ssl_settings->set_private_key(restbed::Uri {fmt::format("file://{}", host_http_api.rsa_priv_key_path( ))});
+    ssl_settings->set_certificate(restbed::Uri {fmt::format("file://{}", host_http_api.ssl_cert_path( ))});
+    ssl_settings->set_temporary_diffie_hellman(restbed::Uri {fmt::format("file://{}", host_http_api.ssl_dh_path( ))});
     ssl_settings->set_port(ssl_port);
     settings->set_ssl_settings(ssl_settings);
   }

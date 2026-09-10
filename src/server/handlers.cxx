@@ -4,9 +4,14 @@
 #include <inc/logger.hxx>
 #include <wbr/string_manipulations.hxx>
 
+#include "api_impl.hxx"
 #include "http_auth.hxx"
 
-extern std::unique_ptr<plugin_api_i> api;
+// plugin_api_t (concrete), not plugin_api_i - must match server.cxx's actual
+// definition of this global exactly (see http_auth.cxx's identical note).
+// Every call below only ever uses plugin_api_i-level methods, but the
+// declared type still has to agree with the real one.
+extern std::unique_ptr<plugin_api_t> api;
 
 handler_result_t session_new_handler (const parameter_map_t& params) {
   board_id_t board_id {0};

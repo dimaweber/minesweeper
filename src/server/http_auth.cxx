@@ -6,7 +6,7 @@
 #include <inc/logger.hxx>
 #include <wbr/string_manipulations.hxx>
 
-extern std::shared_ptr<plugin_api_i> api;
+#include "api_impl.hxx"
 
 using namespace std::chrono_literals;
 
@@ -34,7 +34,7 @@ result_t<std::string> get_jwt_from_request (restbed::Session& session) {
 }  // namespace
 
 result_t<int> get_id_from_jwt (const std::string& token) {
-  auto verify = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(api->http_api(  )->rsa_public_key( ), api->http_api(  )->rsa_private_key( ), "", "")).with_issuer(issuer);
+  auto verify = jwt::verify( ).allow_algorithm(jwt::algorithm::rs256(host_http_api.rsa_public_key( ), host_http_api.rsa_private_key( ), "", "")).with_issuer(issuer);
   try {
     const auto decoded = jwt::decode(token);
 
@@ -86,7 +86,7 @@ result_t<std::string> create_jwt_for_client (client_id_t client_id) {
                            .set_issued_at(std::chrono::system_clock::now( ))
                            .set_expires_in(24h)
                            .set_payload_claim(client_id_claim, jwt::claim(std::to_string(client_id)))
-                           .sign(jwt::algorithm::rs256(api->http_api(  )->rsa_public_key( ), api->http_api(  )->rsa_private_key( ), "", ""));
+                           .sign(jwt::algorithm::rs256(host_http_api.rsa_public_key( ), host_http_api.rsa_private_key( ), "", ""));
 
     SPDLOG_DEBUG("generated JWT token for client {}: {}", client_id, token);
     return token;
