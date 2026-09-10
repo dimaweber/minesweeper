@@ -112,12 +112,42 @@ ADDON_PLUGIN_ABI_TAG( )  // defines abi_tag() above - see api.hxx and "ABI compa
 ### The two handler shapes
 
 A handler is one of two distinct function-pointer types, not one signature plus a
-"does this need auth" flag:
+"does this need auth" flag. The actual ABI-level types speak only in bytes — no
+`parameter_t`, `parameter_map_t`, or `std::string` crosses this function-pointer call as
+a C++ object, only pointers and sizes:
 
 ```cpp
-using simple_handler_t = handler_result_t (*)(const parameter_map_t& params);
-using board_handler_t  = handler_result_t (*)(board_i& board, const parameter_map_t& params);
+using simple_handler_t = size_t (*)(const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
+using board_handler_t  = size_t (*)(board_i& board, const std::byte* params_buf, size_t params_len, std::byte* out_buf, size_t out_cap);
 ```
+
+This is the same "don't cross the ABI boundary as a type-erased/heap-owning C++ object"
+reasoning as "Why references and function pointers, not `shared_ptr`/`std::function`"
+below — extended from the callback mechanism itself to the *data* crossing it, since a
+`parameter_map_t` (a `std::unordered_map` of a recursive `std::variant`) passed by value
+would otherwise need host and plugin to agree on more than layout: allocator/heap
+behavior for everything nested inside it too.
+
+**You never write a function matching either signature directly.** You write an
+ordinary `parameter_map_t`-in/`handler_result_t`-out function — exactly the shape this
+document has always described — and register it through one of two adapter templates
+instead of passing the bare function:
+
+```cpp
+handler_result_t my_handler (board_i& board, const parameter_map_t& params);
+// ...
+api->add_resource(path, method, board_handler_adapter<my_handler>, params);
+```
+
+`simple_handler_adapter<Handler>`/`board_handler_adapter<Handler>` (declared in
+`api.hxx`, right after `plugin_api_i`) `load()` the incoming `parameter_map_t` from
+`params_buf` via `parameter_bytestream_t`, call `Handler` exactly as before, catch any
+exception it throws (turned into a 500 — `Handler` never needs its own top-level
+`try`/`catch`), and `store()` the result back into `out_buf`. `Handler` is a *non-type
+template parameter*, so each instantiation is itself an ordinary, capture-free function —
+a valid `simple_handler_t`/`board_handler_t` value — compiled by whichever side (host or
+plugin) registers it; nothing about how you write `my_handler` itself changes, only the
+one line that registers it.
 
 `handler_result_t` is `std::expected<parameter_map_t, handler_error_t>`, where
 `handler_error_t` is `{int http_code; std::string message;}`. A handler never touches a
@@ -131,6 +161,9 @@ The two shapes are registered through two different `add_resource` overloads:
 void add_resource(std::string_view path, http_methods_t method, simple_handler_t handler, std::vector<param_spec_t> params = { });
 void add_resource(std::string_view path, http_methods_t method, board_handler_t  handler, std::vector<param_spec_t> params = { });
 ```
+
+(passing `simple_handler_adapter<my_handler>`/`board_handler_adapter<my_handler>` — see
+above — not `my_handler` itself.)
 
 Only `add_resource`'s `board_handler_t` overload authenticates the caller and resolves
 *their* board (via the same JWT-bearer-token flow `server_api.md` documents) before ever
@@ -203,7 +236,7 @@ handler_result_t my_handler (board_i& board, const parameter_map_t& params) {
 }
 
 void install_resource ( ) {
-  api->add_resource(rest_resource_path, http_methods_t::GET, my_handler,
+  api->add_resource(rest_resource_path, http_methods_t::GET, board_handler_adapter<my_handler>,
       {
           {.name = "n", .type = param_type_t::integer, .required = true},
   });
@@ -258,6 +291,7 @@ board_i&                   board(board_id_t board_id);                    // thr
 std::optional<client_id_t> add_new_client(board_id_t board_id);
 std::optional<board_i&>    board_for_client(client_id_t client_id);
 std::unique_ptr<board_i>   create_board(std::size_t width, std::size_t height, int bombs_count);
+std::unique_ptr<board_i>   create_fixed_board(std::size_t width, std::size_t height, std::vector<coord_t> mines); // explicit mine layout, not rand()-placed
 ```
 `board_for_client` is the per-client independent copy of the board (see
 `server_api.md`'s session model) — it's what the host resolves and hands your
