@@ -11,7 +11,7 @@ know or repeat a sender's configuration.
 envelope::config_t cfg;
 cfg.compress    = true;
 cfg.encrypt     = true;
-cfg.encrypt_key = my_32_byte_key;   // AES-256
+cfg.encrypt_key = my_key;           // envelope::aes_256_key_t - 32 bytes, cleansed on destruction
 cfg.sign        = true;
 cfg.sign_key    = my_sign_key;      // HMAC-SHA256, any length
 cfg.base64      = envelope::base64_mode_t::url_safe;  // or standard, or none for raw bytes
@@ -98,18 +98,40 @@ lenient about padding on the way in costs nothing.
   without a streaming API. Capped at 256 MiB claimed size to avoid a
   decompression-bomb-via-size-lie on malformed input.
 - **encrypt** — AES-256-GCM (AEAD: confidentiality and authenticity together, via a
-  fresh random 96-bit nonce per call). `encrypt_key` must be exactly 32 bytes. A nonce
-  is never reused with the same key.
+  fresh random 96-bit nonce per call). `encrypt_key` is `std::optional<aes_256_key_t>` —
+  always exactly 32 bytes when present, so there's nothing to validate about its size,
+  only whether it's set at all. A nonce is never reused with the same key.
 - **sign** — HMAC-SHA256, a shared-secret MAC, not an asymmetric signature — no
   public-key trust setup, and it works as a standalone integrity layer for a
   "signed but not encrypted" mode that GCM's own authentication can't offer on its own
   (AEAD only authenticates when it's also encrypting). Tag comparison uses
   `CRYPTO_memcmp` (constant-time), not `==`/`memcmp`.
 
+## Key hygiene
+
+`aes_256_key_t` (`encrypt_key`) and `secure_bytes_t` (`sign_key`) both overwrite their
+bytes with `OPENSSL_cleanse()` — not a plain `memset`, which a compiler can legally
+optimize away as a dead store once it can prove a buffer is about to be freed — when the
+object holding them is destroyed, so key material doesn't just sit in freed/reused
+memory once `config_t`/`envelope_t` is done with it. `config_t` itself stays a plain
+aggregate (so `config_t{.compress = true, ...}`-style initialization keeps working) —
+the cleansing lives on these two field types instead of a `config_t` destructor, which
+would have disqualified it from being an aggregate at all.
+
+One wrinkle worth knowing: `std::array` (which `aes_256_key_t` wraps) has no real move
+semantics — there's no pointer to steal, so "moving" one just copies its elements. A
+plain destructor-only fix would still eventually wipe a moved-from copy, just not until
+*that* object was separately destroyed; `aes_256_key_t`'s move constructor/assignment
+cleanse the source immediately instead of leaving that copy to linger. `secure_bytes_t`
+doesn't need the same treatment — `std::vector`'s move already transfers ownership
+cleanly, leaving nothing behind in the moved-from object to cleanse.
+
 ## What this doesn't do
 
-- **Key management.** How `encrypt_key`/`sign_key` are generated, distributed, rotated,
-  or stored is entirely the caller's problem. This library only consumes them.
+- **Key management.** How `encrypt_key`/`sign_key` are generated, distributed, or
+  rotated is entirely the caller's problem — this library only consumes them (and, per
+  [Key hygiene](#key-hygiene) above, wipes its own copy once it's done with it; a caller
+  that keeps its own separate copy around is still responsible for that copy).
 - **Replay protection.** A verified, decrypted blob is exactly what was wrapped — but
   nothing stops the same wrapped blob from being replayed later unless the caller adds
   its own nonce/timestamp/sequence-number *inside* the payload and checks it after
@@ -120,7 +142,10 @@ lenient about padding on the way in costs nothing.
 
 ## Dependencies
 
-OpenSSL (`libcrypto`, for HMAC/AES-GCM/`CRYPTO_memcmp`/`RAND_bytes`) and zlib. Both
+OpenSSL (`libcrypto`, for HMAC/AES-GCM/`CRYPTO_memcmp`/`RAND_bytes`/`OPENSSL_cleanse`) and
+zlib. `<openssl/crypto.h>` (for `OPENSSL_cleanse`) is included directly by the public
+`envelope.hxx`, not just internally by `src/crypto.cxx` — the only third-party header
+that leaks into the public API surface. Both
 third-party — nothing here depends on anything else in whichever repository it's
 currently vendored inside (see the note at the top of
 `include/envelope/envelope.hxx`), so this directory can be lifted into its own project

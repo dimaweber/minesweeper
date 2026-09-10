@@ -31,8 +31,8 @@ envelope_t::envelope_t (config_t config) : config_(std::move(config)) {
 }
 
 std::expected<std::vector<std::byte>, std::string> envelope_t::wrap (std::span<const std::byte> data) const {
-  if ( config_.encrypt && config_.encrypt_key.size( ) != detail::aes_gcm_key_size ) {
-    return std::unexpected("envelope_t::wrap: encrypt is enabled but encrypt_key isn't 32 bytes.");
+  if ( config_.encrypt && !config_.encrypt_key ) {
+    return std::unexpected("envelope_t::wrap: encrypt is enabled but encrypt_key isn't set.");
   }
   if ( config_.sign && config_.sign_key.empty( ) ) {
     return std::unexpected("envelope_t::wrap: sign is enabled but sign_key is empty.");
@@ -45,7 +45,7 @@ std::expected<std::vector<std::byte>, std::string> envelope_t::wrap (std::span<c
   }
 
   if ( config_.encrypt ) {
-    auto encrypted = detail::aes_gcm_encrypt(config_.encrypt_key, payload);
+    auto encrypted = detail::aes_gcm_encrypt(config_.encrypt_key->bytes( ), payload);
     if ( !encrypted ) {
       return std::unexpected(std::move(encrypted.error( )));
     }
@@ -66,7 +66,7 @@ std::expected<std::vector<std::byte>, std::string> envelope_t::wrap (std::span<c
   framed.insert(framed.end( ), payload.begin( ), payload.end( ));
 
   if ( config_.sign ) {
-    const auto tag = detail::hmac_sha256(config_.sign_key, framed);
+    const auto tag = detail::hmac_sha256(config_.sign_key.bytes( ), framed);
     framed.insert(framed.end( ), tag.begin( ), tag.end( ));
   }
 
@@ -113,7 +113,7 @@ std::expected<std::vector<std::byte>, std::string> envelope_t::unwrap (std::span
 
     const std::span<const std::byte> signed_part(framed.data( ), body_end);
     const std::span<const std::byte> got_tag(framed.data( ) + body_end, detail::hmac_sha256_tag_size);
-    const auto                       expected_tag = detail::hmac_sha256(config_.sign_key, signed_part);
+    const auto                       expected_tag = detail::hmac_sha256(config_.sign_key.bytes( ), signed_part);
     if ( !detail::constant_time_equal(expected_tag, got_tag) ) {
       return std::unexpected("envelope_t::unwrap: signature verification failed.");
     }
@@ -122,10 +122,10 @@ std::expected<std::vector<std::byte>, std::string> envelope_t::unwrap (std::span
   std::vector<std::byte> payload(framed.begin( ) + static_cast<ptrdiff_t>(header_size), framed.begin( ) + static_cast<ptrdiff_t>(body_end));
 
   if ( mask & mask_encrypt ) {
-    if ( config_.encrypt_key.size( ) != detail::aes_gcm_key_size ) {
-      return std::unexpected("envelope_t::unwrap: blob is encrypted but no valid encrypt_key is configured.");
+    if ( !config_.encrypt_key ) {
+      return std::unexpected("envelope_t::unwrap: blob is encrypted but no encrypt_key is configured.");
     }
-    auto decrypted = detail::aes_gcm_decrypt(config_.encrypt_key, payload);
+    auto decrypted = detail::aes_gcm_decrypt(config_.encrypt_key->bytes( ), payload);
     if ( !decrypted ) {
       return std::unexpected(std::move(decrypted.error( )));
     }

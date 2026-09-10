@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <cctype>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -21,8 +22,8 @@ std::string to_string (std::span<const std::byte> b) {
 
 // Fixed, non-secret keys - this is test fixture material, not anything
 // that protects real data.
-std::vector<std::byte> test_encrypt_key ( ) {
-  std::vector<std::byte> key(32);
+envelope::aes_256_key_t test_encrypt_key ( ) {
+  envelope::aes_256_key_t key {};
   for ( size_t i = 0; i < key.size( ); ++i ) {
     key[i] = static_cast<std::byte>(i);
   }
@@ -215,8 +216,10 @@ TEST (Envelope, RejectsWrongEncryptKey) {
   write_cfg.encrypt_key = test_encrypt_key( );
   const envelope::envelope_t writer(write_cfg);
 
+  envelope::aes_256_key_t wrong_key {};
+  wrong_key.fill(std::byte {0xAB});
   envelope::config_t read_cfg {.base64 = envelope::base64_mode_t::none, .encrypt = true};
-  read_cfg.encrypt_key = std::vector<std::byte>(32, std::byte {0xAB});
+  read_cfg.encrypt_key = wrong_key;
   const envelope::envelope_t reader(read_cfg);
 
   const auto wrapped = writer.wrap(to_bytes("payload"));
@@ -251,8 +254,22 @@ TEST (Envelope, RejectsMissingSignKeyOnUnwrapOfSignedBlob) {
   EXPECT_FALSE(unwrapped.has_value( ));
 }
 
+TEST (Envelope, RejectsMissingEncryptKeyOnUnwrapOfEncryptedBlob) {
+  envelope::config_t write_cfg {.base64 = envelope::base64_mode_t::none, .encrypt = true};
+  write_cfg.encrypt_key = test_encrypt_key( );
+  const envelope::envelope_t writer(write_cfg);
+
+  const envelope::envelope_t reader(envelope::config_t {.base64 = envelope::base64_mode_t::none});  // no encrypt_key configured
+
+  const auto wrapped = writer.wrap(to_bytes("payload"));
+  ASSERT_TRUE(wrapped.has_value( )) << wrapped.error( );
+
+  const auto unwrapped = reader.unwrap(*wrapped);
+  EXPECT_FALSE(unwrapped.has_value( ));
+}
+
 TEST (Envelope, WrapRejectsEncryptWithoutAValidKey) {
-  const envelope::envelope_t env(envelope::config_t {.base64 = envelope::base64_mode_t::none, .encrypt = true});  // encrypt_key left empty
+  const envelope::envelope_t env(envelope::config_t {.base64 = envelope::base64_mode_t::none, .encrypt = true});  // encrypt_key left unset
   const auto                 wrapped = env.wrap(to_bytes("payload"));
   EXPECT_FALSE(wrapped.has_value( ));
 }
@@ -273,5 +290,31 @@ TEST (Envelope, InstanceIsReusableAcrossCalls) {
     const auto unwrapped = env.unwrap(*wrapped);
     ASSERT_TRUE(unwrapped.has_value( )) << unwrapped.error( );
     EXPECT_EQ(to_string(*unwrapped), text);
+  }
+}
+
+TEST (Envelope, AesKeyDestructorCleansesItsMemory) {
+  // aes_256_key_t's bytes live inline in the object (std::array, not a
+  // separate heap allocation like a vector's would be), so - unlike
+  // reading through a dangling pointer into freed heap memory - reading
+  // this stack storage as raw bytes after the object's lifetime has ended
+  // (but the storage itself, still ours, hasn't) is well-defined. That's
+  // exactly why this test constructs into (and destroys within) a manually
+  // managed buffer instead of a plain local variable.
+  alignas(envelope::aes_256_key_t) std::byte storage[sizeof(envelope::aes_256_key_t)];
+  auto*                                      key = new (storage) envelope::aes_256_key_t(test_encrypt_key( ).bytes( ));
+
+  bool any_nonzero = false;
+  for ( size_t i = 0; i < key->size( ); ++i ) {
+    if ( (*key)[i] != std::byte {0} ) {
+      any_nonzero = true;
+    }
+  }
+  ASSERT_TRUE(any_nonzero) << "test fixture key was unexpectedly all-zero";
+
+  key->~aes_256_key_t( );
+
+  for ( auto b: storage ) {
+    EXPECT_EQ(b, std::byte {0}) << "key byte was not cleansed on destruction";
   }
 }

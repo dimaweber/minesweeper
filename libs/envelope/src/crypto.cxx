@@ -52,11 +52,7 @@ struct cipher_ctx_t {
 };
 }  // namespace
 
-std::expected<std::vector<std::byte>, std::string> aes_gcm_encrypt (std::span<const std::byte> key, std::span<const std::byte> plaintext) {
-  if ( key.size( ) != aes_gcm_key_size ) {
-    return std::unexpected("envelope: AES-256-GCM key must be 32 bytes.");
-  }
-
+std::expected<std::vector<std::byte>, std::string> aes_gcm_encrypt (const aes_key_t& key, std::span<const std::byte> plaintext) {
   std::array<std::byte, aes_gcm_nonce_size> nonce {};
   if ( RAND_bytes(reinterpret_cast<unsigned char*>(nonce.data( )), static_cast<int>(nonce.size( ))) != 1 ) {
     return std::unexpected("envelope: failed to generate a random nonce.");
@@ -103,10 +99,7 @@ std::expected<std::vector<std::byte>, std::string> aes_gcm_encrypt (std::span<co
   return out;
 }
 
-std::expected<std::vector<std::byte>, std::string> aes_gcm_decrypt (std::span<const std::byte> key, std::span<const std::byte> nonce_ciphertext_tag) {
-  if ( key.size( ) != aes_gcm_key_size ) {
-    return std::unexpected("envelope: AES-256-GCM key must be 32 bytes.");
-  }
+std::expected<std::vector<std::byte>, std::string> aes_gcm_decrypt (const aes_key_t& key, std::span<const std::byte> nonce_ciphertext_tag) {
   if ( nonce_ciphertext_tag.size( ) < aes_gcm_nonce_size + aes_gcm_tag_size ) {
     return std::unexpected("envelope: encrypted payload too short for its nonce/tag.");
   }
