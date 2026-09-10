@@ -29,6 +29,19 @@ std::ostream& operator<< (std::ostream& os, const parameter_t& p) {
   return os;
 }
 
+// store() into buffer with one instance, then load() from it with a fresh
+// one - mirrors how host and plugin would each use their own instance over
+// the same bytes.
+result_t<parameter_t> roundtrip (const parameter_t& p, std::span<std::byte> buffer) {
+  parameter_bytestream_t pbs_write(buffer);
+  if ( const auto written = pbs_write.store(p); !written ) {
+    return std::unexpected(written.error( ));
+  }
+
+  parameter_bytestream_t pbs_read(buffer);
+  return pbs_read.load( );
+}
+
 TEST (ParametersBitstream, Integers) {
   for ( const auto i: std::initializer_list<int64_t> {
             -0x08'00'00'12'0f'00'00'00,
@@ -45,18 +58,16 @@ TEST (ParametersBitstream, Integers) {
             0xffffffff,
             0x7fbcd98ef012378LL,
             0xfffffffeaffffffLL,
+            std::numeric_limits<int64_t>::max( ),
+            std::numeric_limits<int64_t>::min( ),
         } ) {
     const parameter_t          p_int = i;
     std::array<std::byte, 100> buffer;
     buffer.fill(std::byte {0xfa});
 
-    parameter_bytestream_t pbs_write(buffer);
-    pbs_write.serialize(p_int);
-
-    parameter_bytestream_t pbs_read(buffer);
-    const parameter_t      out = pbs_read.deserialize( );
-
-    EXPECT_EQ(out, p_int);
+    const auto out = roundtrip(p_int, buffer);
+    ASSERT_TRUE(out.has_value( )) << out.error( );
+    EXPECT_EQ(*out, p_int);
   }
 }
 
@@ -65,13 +76,9 @@ TEST (ParametersBitstream, Strings) {
   std::array<std::byte, 100> buffer;
   buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_str);
-
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_str);
+  const auto out = roundtrip(p_str, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_str);
 }
 
 TEST (ParametersBitstream, Booleans) {
@@ -79,13 +86,9 @@ TEST (ParametersBitstream, Booleans) {
   std::array<std::byte, 100> buffer;
   buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_bool);
-
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_bool);
+  const auto out = roundtrip(p_bool, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_bool);
 }
 
 TEST (ParametersBitstream, IntegersList) {
@@ -93,13 +96,9 @@ TEST (ParametersBitstream, IntegersList) {
   std::array<std::byte, 100> buffer;
   buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_list);
-
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_list);
+  const auto out = roundtrip(p_list, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_list);
 }
 
 TEST (ParametersBitstream, StringsList) {
@@ -107,13 +106,9 @@ TEST (ParametersBitstream, StringsList) {
   std::array<std::byte, 100> buffer;
   buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_list);
-
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_list);
+  const auto out = roundtrip(p_list, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_list);
 }
 
 TEST (ParametersBitstream, IntegersListsList) {
@@ -125,13 +120,9 @@ TEST (ParametersBitstream, IntegersListsList) {
   std::array<std::byte, 100> buffer;
   buffer.fill(std::byte {0xfa});
 
-  parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_list);
-
-  parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_list);
+  const auto out = roundtrip(p_list, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_list);
 }
 
 TEST (ParametersBitstream, Map) {
@@ -157,11 +148,35 @@ TEST (ParametersBitstream, Map) {
   std::array<std::byte, 0x1000> buffer;
   buffer.fill(std::byte {0xfa});
 
+  const auto out = roundtrip(p_map, buffer);
+  ASSERT_TRUE(out.has_value( )) << out.error( );
+  EXPECT_EQ(*out, p_map);
+}
+
+TEST (ParametersBitstream, RejectsReusedInstance) {
+  std::array<std::byte, 100> buffer;
+  buffer.fill(std::byte {0xfa});
+
+  parameter_bytestream_t pbs(buffer);
+  ASSERT_TRUE(pbs.store(parameter_t {int64_t {42}}).has_value( ));
+
+  // offset_ is no longer 0 after the first store() - a second store() or a
+  // load() on the same instance would either corrupt the buffer or parse
+  // from the middle of it, so both must be refused rather than silently
+  // doing the wrong thing.
+  EXPECT_FALSE(pbs.store(parameter_t {int64_t {7}}).has_value( ));
+  EXPECT_FALSE(pbs.load( ).has_value( ));
+}
+
+TEST (ParametersBitstream, RejectsWireVersionMismatch) {
+  std::array<std::byte, 100> buffer;
+  buffer.fill(std::byte {0xfa});
+
   parameter_bytestream_t pbs_write(buffer);
-  pbs_write.serialize(p_map);
+  ASSERT_TRUE(pbs_write.store(parameter_t {std::string("x")}).has_value( ));
+
+  buffer[0] = std::byte {parameter_bytestream_t::wire_version + 1};
 
   parameter_bytestream_t pbs_read(buffer);
-  const parameter_t      out = pbs_read.deserialize( );
-
-  EXPECT_EQ(out, p_map);
+  EXPECT_FALSE(pbs_read.load( ).has_value( ));
 }

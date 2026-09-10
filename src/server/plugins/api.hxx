@@ -282,6 +282,9 @@ struct parameter_t : std::variant<std::string, int64_t, uint64_t, bool, std::vec
 using parameter_list_t = std::vector<parameter_t>;
 using parameter_map_t  = std::unordered_map<std::string, parameter_t>;
 
+template<typename T>
+using result_t = std::expected<T, std::string>;
+
 struct parameter_bytestream_t {
   parameter_bytestream_t (std::byte* buffer, size_t buffer_size) : buffer_(buffer), buffer_size_(buffer_size) {
   }
@@ -289,68 +292,60 @@ struct parameter_bytestream_t {
   explicit parameter_bytestream_t (std::span<std::byte> buffer) : buffer_(buffer.data( )), buffer_size_(buffer.size( )) {
   }
 
-  bool serialize (const parameter_t& param) {
-    if ( (size_t)offset_ >= buffer_size_ ) {
-      return false;
-    }
-    if ( std::holds_alternative<std::string>(param) ) {
-      return write(std::get<std::string>(param));
-    }
-    if ( std::holds_alternative<int64_t>(param) ) {
-      return write(std::get<int64_t>(param));
-    }
-    if ( std::holds_alternative<uint64_t>(param) ) {
-      return write(static_cast<int64_t>(std::get<uint64_t>(param)));
-    }
-    if ( std::holds_alternative<bool>(param) ) {
-      return write(std::get<bool>(param));
-    }
-    if ( std::holds_alternative<parameter_list_t>(param) ) {
-      return write(std::get<parameter_list_t>(param));
-    }
-    if ( std::holds_alternative<parameter_map_t>(param) ) {
-      return write(std::get<parameter_map_t>(param));
-    }
-    return false;
-  }
+  // Bump when serialize()/deserialize()'s wire grammar changes shape in a
+  // way that would make an old reader misparse a new writer's bytes (new
+  // type_tag values appended at the end are fine; anything else isn't).
+  // Written/checked once per buffer by store()/load(), outside the
+  // recursive grammar itself - serialize()/deserialize() stay unaware it
+  // exists.
+  static constexpr uint8_t wire_version = 1;
 
-  parameter_t deserialize ( ) {
-    const type_tag tag = read_tag( );
-    switch ( tag ) {
-      using enum type_tag;
-      case null:        return { };
-      case string1:     return read_string(1);
-      case string2:     return read_string(2);
-      case string3:     return read_string(3);
-      case string4:     return read_string(4);
-      case string5:     return read_string(5);
-      case string6:     return read_string(6);
-      case string7:     return read_string(7);
-      case string8:     return read_string(8);
-      case number1:     return read_integer(1);
-      case number2:     return read_integer(2);
-      case number3:     return read_integer(3);
-      case number4:     return read_integer(4);
-      case number5:     return read_integer(5);
-      case number6:     return read_integer(6);
-      case number7:     return read_integer(7);
-      case number8:     return read_integer(8);
-      case neg_number1: return -read_integer(1);
-      case neg_number2: return -read_integer(2);
-      case neg_number3: return -read_integer(3);
-      case neg_number4: return -read_integer(4);
-      case neg_number5: return -read_integer(5);
-      case neg_number6: return -read_integer(6);
-      case neg_number7: return -read_integer(7);
-      case neg_number8: return -read_integer(8);
-      case boolean:     return read_bool( );
-      case vector:      return read_vector( );
-      case map:         return read_map( );
+  // Public entry points: store()/load() are the only way in or out of a
+  // buffer, and neither ever lets an exception reach the caller - every
+  // internal failure (buffer overrun, malformed tag, version mismatch,
+  // reuse of an already-used instance) comes back as the error side of
+  // result_t, so a caller on the other side of a dlopen boundary can't
+  // forget to handle it and doesn't need to know this type can throw at
+  // all internally. serialize()/deserialize() are the recursive core and
+  // are deliberately private - a caller only ever deals in whole, versioned
+  // buffers.
+  [[nodiscard]] result_t<void> store (const parameter_t& param) {
+    if ( offset_ != 0 ) {
+      return std::unexpected(fmt::format("parameter_bytestream_t::store: instance already used (offset {} != 0); use a fresh instance per buffer", offset_));
+    }
+    try {
+      put_byte(wire_version);
+      serialize(param);
+    } catch ( const std::exception& e ) {
+      return std::unexpected(fmt::format("parameter_bytestream_t::store failed: {}", e.what( )));
     }
     return { };
   }
 
+  [[nodiscard]] result_t<parameter_t> load ( ) {
+    if ( offset_ != 0 ) {
+      return std::unexpected(fmt::format("parameter_bytestream_t::load: instance already used (offset {} != 0); use a fresh instance per buffer", offset_));
+    }
+    try {
+      const uint8_t version = read_byte( );
+      if ( version != wire_version ) {
+        return std::unexpected(fmt::format("parameter_bytestream_t::load: wire version mismatch (expected {}, got {})", wire_version, version));
+      }
+      return deserialize( );
+    } catch ( const std::exception& e ) {
+      return std::unexpected(fmt::format("parameter_bytestream_t::load failed: {}", e.what( )));
+    }
+  }
+
 private:
+  // Internal-only: serialize()/deserialize()'s recursive descent unwinds
+  // through this on any failure. It never crosses store()/load() - both
+  // catch std::exception and convert to result_t's error side before
+  // returning.
+  struct error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+  };
+
   enum type_tag : uint8_t {
     null,
     string1,
@@ -406,45 +401,30 @@ private:
     return *as_ptr<T>(buffer_ + offset_);
   }
 
-  size_t write_tag (type_tag tag) {
-    if ( offset_ + sizeof(type_tag) > buffer_size_ ) {
-      return 0;
+  // Every read/write primitive below funnels through here first, so a
+  // truncated, corrupted, or maliciously short buffer fails loudly right
+  // where it would otherwise read/write out of bounds, instead of silently
+  // touching memory past buffer_size_.
+  void check_capacity (size_t needed) const {
+    if ( static_cast<size_t>(offset_) + needed > buffer_size_ ) {
+      throw error(fmt::format("parameter_bytestream_t: buffer overrun at offset {} (need {} more bytes, capacity {})", offset_, needed, buffer_size_));
     }
+  }
+
+  void write_tag (type_tag tag) {
+    check_capacity(sizeof(type_tag));
     as_ref<type_tag>( ) = tag;
     offset_ += sizeof(type_tag);
-    return offset_;
   }
 
-  size_t write_len (size_t len) {
-    if ( offset_ + sizeof(len) > buffer_size_ ) {
-      return 0;
-    }
-    as_ref<size_t>( ) = len;
-    offset_ += sizeof(len);
-    return offset_;
-  }
-
-  template<typename T>
-  size_t write_len ( ) {
-    return write_len(sizeof(T));
-  }
-
-  template<typename T>
-  size_t write_value (const T& v) {
-    if ( offset_ + sizeof(T) > buffer_size_ ) {
-      return 0;
-    }
-    as_ref<std::remove_cv_t<T>>( ) = v;
-    offset_ += sizeof(T);
-    return offset_;
+  void write_len (size_t len) {
+    write(len);
   }
 
   template<std::convertible_to<std::string> T>
-  size_t write (const T& str) {
-    const auto str_size = str.size( );
-    if ( offset_ + sizeof(type_tag) + sizeof(size_t) + str_size > buffer_size_ ) {
-      return 0;
-    }
+  void write (const T& str) {
+    const size_t str_size = str.size( );
+    check_capacity(sizeof(type_tag) + sizeof(size_t) + str_size);
 
     if ( str_size < 0x100 ) {
       write_tag(type_tag::string1);
@@ -502,14 +482,10 @@ private:
 
     std::copy_n(str.data( ), str_size, as_ptr<char>( ));
     offset_ += str_size;
-
-    return offset_;
   }
 
   void put_byte (uint8_t byte) {
-    if ( offset_ + sizeof(uint8_t) > buffer_size_ ) {
-      return;
-    }
+    check_capacity(sizeof(uint8_t));
     as_ref<uint8_t>( ) = byte;
     offset_ += sizeof(uint8_t);
   }
@@ -519,38 +495,36 @@ private:
   }
 
   template<std::integral T>
-  size_t write (T val) {
-    if ( offset_ + sizeof(type_tag) + sizeof(T) > buffer_size_ ) {
-      return 0;
-    }
+  void write (T val) {
+    check_capacity(sizeof(type_tag) + sizeof(T));
     if ( val >= 0 ) {
       const uint64_t v = static_cast<uint64_t>(val);
       if ( v < 0x1'00 ) {
         write_tag(type_tag::number1);
         put_byte(byte(v, 0));
-      } else if ( val < 0x1'00'00 ) {
+      } else if ( v < 0x1'00'00 ) {
         write_tag(type_tag::number2);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
-      } else if ( val < 0x1'00'00'00 ) {
+      } else if ( v < 0x1'00'00'00 ) {
         write_tag(type_tag::number3);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
         put_byte(byte(v, 2));
-      } else if ( val < 0x1'00'00'00'00 ) {
+      } else if ( v < 0x1'00'00'00'00 ) {
         write_tag(type_tag::number4);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
         put_byte(byte(v, 2));
         put_byte(byte(v, 3));
-      } else if ( val < 0x1'00'00'00'00'00 ) {
+      } else if ( v < 0x1'00'00'00'00'00 ) {
         write_tag(type_tag::number5);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
         put_byte(byte(v, 2));
         put_byte(byte(v, 3));
         put_byte(byte(v, 4));
-      } else if ( val < 0x1'00'00'00'00'00'00 ) {
+      } else if ( v < 0x1'00'00'00'00'00'00 ) {
         write_tag(type_tag::number6);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
@@ -558,7 +532,7 @@ private:
         put_byte(byte(v, 3));
         put_byte(byte(v, 4));
         put_byte(byte(v, 5));
-      } else if ( val < 0x1'00'00'00'00'00'00'00 ) {
+      } else if ( v < 0x1'00'00'00'00'00'00'00 ) {
         write_tag(type_tag::number7);
         put_byte(byte(v, 0));
         put_byte(byte(v, 1));
@@ -579,7 +553,7 @@ private:
         put_byte(byte(v, 7));
       }
     } else {
-      const uint64_t v = static_cast<uint64_t>(-val);
+      const uint64_t v = -static_cast<uint64_t>(val);
       if ( v < 0x1'00 ) {
         write_tag(type_tag::neg_number1);
         put_byte(byte(v, 0));
@@ -634,66 +608,83 @@ private:
         put_byte(byte(v, 7));
       }
     }
-    return offset_;
   }
 
-  size_t write (bool val) {
-    if ( offset_ + sizeof(type_tag) + sizeof(bool) > buffer_size_ ) {
-      return 0;
-    }
+  void write (bool val) {
+    check_capacity(sizeof(type_tag) + sizeof(bool));
     write_tag(type_tag::boolean);
     as_ref<bool>( ) = val;
     offset_ += sizeof(bool);
-
-    return offset_;
   }
 
-  size_t write (const parameter_list_t& vec) {
+  void write (const parameter_list_t& vec) {
     write_tag(type_tag::vector);
     write_len(vec.size( ));
     for ( const auto& item: vec ) {
-      if ( !serialize(item) ) {
-        return 0;
-      }
+      serialize(item);
     }
-    return offset_;
   }
 
-  size_t write (const parameter_map_t& m) {
+  void write (const parameter_map_t& m) {
     write_tag(type_tag::map);
     write_len(m.size( ));
     for ( const auto& [key, item]: m ) {
       write(key);
-      if ( !serialize(item) ) {
-        return 0;
-      }
+      serialize(item);
     }
-    return offset_;
+  }
+
+  void serialize (const parameter_t& param) {
+    if ( std::holds_alternative<std::string>(param) ) {
+      write(std::get<std::string>(param));
+    } else if ( std::holds_alternative<int64_t>(param) ) {
+      write(std::get<int64_t>(param));
+    } else if ( std::holds_alternative<uint64_t>(param) ) {
+      write(static_cast<int64_t>(std::get<uint64_t>(param)));
+    } else if ( std::holds_alternative<bool>(param) ) {
+      write(std::get<bool>(param));
+    } else if ( std::holds_alternative<parameter_list_t>(param) ) {
+      write(std::get<parameter_list_t>(param));
+    } else if ( std::holds_alternative<parameter_map_t>(param) ) {
+      write(std::get<parameter_map_t>(param));
+    } else {
+      throw error("parameter_bytestream_t: parameter_t holds an unserializable alternative");
+    }
   }
 
   size_t read_len ( ) {
-    const auto ret = as_ref<size_t>( );
-    offset_ += sizeof(size_t);
-    return ret;
+    const type_tag tag = read_tag( );
+    switch ( tag ) {
+      using enum type_tag;
+      case number1:     return read_integer(1);
+      case number2:     return read_integer(2);
+      case number3:     return read_integer(3);
+      case number4:     return read_integer(4);
+      case number5:     return read_integer(5);
+      case number6:     return read_integer(6);
+      case number7:     return read_integer(7);
+      case number8:     return read_integer(8);
+      default:          throw error(fmt::format("parameter_bytestream_t: invalid type tag {} for length", static_cast<int>(tag)));
+    }
   }
 
   type_tag read_tag ( ) {
+    check_capacity(sizeof(type_tag));
     const auto ret = as_ref<type_tag>( );
     offset_ += sizeof(type_tag);
     return ret;
   }
 
   std::string read_string (int bytes) {
-    uint64_t len = 0;
-    for ( int i = 0; i < bytes; ++i ) {
-      len |= static_cast<uint64_t>(read_byte( )) << (i * 8);
-    }
+    const size_t len = read_integer(bytes);
+    check_capacity(len);
     const std::string_view sv {as_ptr<char>( ), len};
     offset_ += len;
     return std::string {sv};
   }
 
   uint8_t read_byte ( ) {
+    check_capacity(sizeof(uint8_t));
     const uint8_t ret = as_ref<uint8_t>( );
     offset_ += sizeof(uint8_t);
     return ret;
@@ -709,6 +700,7 @@ private:
   }
 
   bool read_bool ( ) {
+    check_capacity(sizeof(bool));
     const bool ret = as_ref<bool>( );
     offset_ += sizeof(bool);
     return ret;
@@ -739,12 +731,48 @@ private:
           case string6: return read_string(6);
           case string7: return read_string(7);
           case string8: return read_string(8);
-          default:      throw std::runtime_error("Invalid type tag for map key");
+          default:      throw error(fmt::format("parameter_bytestream_t: invalid type tag {} for map key", static_cast<int>(e)));
         }
       }(tag);
       m.emplace(key, deserialize( ));
     }
     return m;
+  }
+
+  parameter_t deserialize ( ) {
+    const type_tag tag = read_tag( );
+    switch ( tag ) {
+      using enum type_tag;
+      case null:        return { };
+      case string1:     return read_string(1);
+      case string2:     return read_string(2);
+      case string3:     return read_string(3);
+      case string4:     return read_string(4);
+      case string5:     return read_string(5);
+      case string6:     return read_string(6);
+      case string7:     return read_string(7);
+      case string8:     return read_string(8);
+      case number1:     return read_integer(1);
+      case number2:     return read_integer(2);
+      case number3:     return read_integer(3);
+      case number4:     return read_integer(4);
+      case number5:     return read_integer(5);
+      case number6:     return read_integer(6);
+      case number7:     return read_integer(7);
+      case number8:     return read_integer(8);
+      case neg_number1: return -read_integer(1);
+      case neg_number2: return -read_integer(2);
+      case neg_number3: return -read_integer(3);
+      case neg_number4: return -read_integer(4);
+      case neg_number5: return -read_integer(5);
+      case neg_number6: return -read_integer(6);
+      case neg_number7: return -read_integer(7);
+      case neg_number8: return static_cast<int64_t>(-read_integer<uint64_t>(8));
+      case boolean:     return read_bool( );
+      case vector:      return read_vector( );
+      case map:         return read_map( );
+    }
+    throw error(fmt::format("parameter_bytestream_t: invalid type tag {}", static_cast<int>(tag)));
   }
 };
 
@@ -778,9 +806,6 @@ public:
 protected:
   virtual rest_api_response_i& add_raw_header(const std::string& key, const std::string& value) = 0;
 };
-
-template<typename T>
-using result_t = std::expected<T, std::string>;
 
 struct http_api_i {
   virtual ~http_api_i( ) = default;
