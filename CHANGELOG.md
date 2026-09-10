@@ -7,6 +7,19 @@ reconstruction after the fact.
 
 ## 2026-09-10
 
+- `envelope`: `OPENSSL_cleanse()` key material on destruction (`0e8c6df`). `encrypt_key`/
+  `sign_key` sat in memory unwiped once a `config_t`/`envelope_t` was done with them.
+  `aes_256_key_t` (was a plain `std::array<std::byte, 32>` alias) is now a class that
+  cleanses its bytes on destruction *and* on move — `std::array` has no real move
+  semantics, so without that a moved-from key would leave an uncleansed duplicate
+  sitting around. `sign_key`'s field type changed to a new `secure_bytes_t` wrapper with
+  the same on-destruction cleansing (no special move handling needed there — a
+  `std::vector` move already leaves the source empty). `config_t` itself deliberately
+  stays a plain aggregate — putting a destructor directly on it would have broken every
+  `config_t{.compress = true, ...}` designated-initializer call site — so the cleansing
+  lives on these two field types instead. Added a test verifying the wipe actually
+  happens via placement-new into a manually managed buffer, so reading the bytes
+  afterward is well-defined rather than a read through freed/moved-from memory.
 - **Add `envelope`: a standalone compress/encrypt/sign/base64 byte-wrapper library**
   (`7906c61`). A generic byte-buffer wrapper for network use, factored out as its own
   library from the start (`libs/envelope/`, own `CMakeLists.txt`, no `#include` of
