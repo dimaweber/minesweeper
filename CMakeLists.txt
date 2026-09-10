@@ -58,6 +58,13 @@ else ()
     add_compile_definitions(BUILD_TESTS=0)
 endif ()
 
+# Deliberately self-contained (see libs/envelope/CMakeLists.txt) - not
+# linked into any minesweeper target, just built and tested alongside it
+# for now. ENVELOPE_BUILD_TESTS defaults from BUILD_TESTS above, so it
+# needs that option defined first, but otherwise has no dependency on
+# anything else in this file.
+add_subdirectory(libs/envelope)
+
 #find_program(CLANG_TIDY_EXE NAMES clang-tidy)
 if (CLANG_TIDY_EXE)
     message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
